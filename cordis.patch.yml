@@ -1,5 +1,6 @@
 # dsh-ledger-compact: ingress shaping + optional local /fast-compact.
-# Does not replace @deepseek-ai/dsh-compaction-basic.
+# Keep @deepseek-ai/dsh-compaction-basic mounted. Optional replaceDefault
+# only swaps its summarize hook to a mechanical fold.
 - insert:
     - id: dsh-ledger-compact
       name: dsh-ledger-compact

@@ -1,7 +1,7 @@
 {
   "name": "dsh-ledger-compact",
-  "version": "0.2.0",
-  "description": "dsh-plugin: OMP-style ingress shaping plus optional local /fast-compact. Dense PNG only when the main model lists image modalities.",
+  "version": "0.3.0",
+  "description": "dsh-plugin: OMP-style ingress shaping plus optional local /fast-compact. Can replace DSH /compact and auto-compaction with a mechanical fold.",
   "license": "MIT",
   "author": "telagod",
   "type": "module",

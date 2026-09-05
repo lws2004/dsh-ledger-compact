@@ -2,7 +2,7 @@
 
 [English](#english) · [中文](#中文)
 
-**dsh-plugin** for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): OMP / pi-zig / pi-moke style **ingress shaping**, plus an optional local `/fast-compact`. It does **not** replace DSH's LLM `/compact`.
+**dsh-plugin** for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): OMP / pi-zig / pi-moke style **ingress shaping**, plus an optional local `/fast-compact`. An opt-in setting can also replace DSH's LLM `/compact` and auto-compaction.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![dsh-plugin](https://img.shields.io/badge/dsh-plugin-111111)](https://github.com/topics/dsh-plugin)
@@ -12,12 +12,12 @@
 
 ## English
 
-Large tool results are trimmed **before they reach the model**. Messages already in the prefix are left alone. `/fast-compact` is an optional mechanical fold (no model call), not the default action.
+Large tool results are trimmed **before they reach the model**. Messages already in the prefix are left alone. `/fast-compact` is an optional mechanical fold (no model call). Replacing the default compact is **off** until you turn it on.
 
 - **Ingress:** on idle pre-step, excerpt oversized `tool_result` blocks from the **current unsent turn**. Default is text excerpt only — no PNG, no LLM.
 - **Input-bar bolt** is a context pressure meter. A second click (can be disabled) folds history into a mechanical short card. The chat shows an expandable fold line in the same style as the official compact row; the open view is a slim left-axis timeline, not a model summary.
-- Settings write through to the Host document immediately: ingress, dense PNG, confirm-before-fold, ingress threshold, PNG savings ratio.
-- `/compact` stays DSH's LLM summarizer. This plugin does not replace `@deepseek-ai/dsh-compaction-basic`.
+- Settings write through to the Host document immediately: ingress, dense PNG, confirm-before-fold, replace-default-compact, ingress threshold, PNG savings ratio.
+- **Replace default compact** (off by default): `/compact`, automatic pressure compaction, and overflow recovery all use the same mechanical `summarize` hook. Keep `@deepseek-ai/dsh-compaction-basic` mounted — this plugin does not swap the engine, only the summarizer. Turn it off to restore the LLM checkpoint.
 
 ### Install
 
@@ -77,12 +77,12 @@ node --test lib/ledger.test.js
 
 ## 中文
 
-对齐 OMP / pi-zig / pi-moke **入境定形**：大工具结果在进模型前裁成摘录，已经进过前缀的旧消息不回头改。`/fast-compact` 仍是可选的本地机械折页，不是默认动作。
+对齐 OMP / pi-zig / pi-moke **入境定形**：大工具结果在进模型前裁成摘录，已经进过前缀的旧消息不回头改。`/fast-compact` 仍是可选的本地机械折页。替换默认压缩默认关闭。
 
 - 入境：空闲步进前裁**当前回合尚未发送**的大 `tool_result`。默认只摘录，不打图、不调模型。
 - 输入栏闪电是**上下文压力表**。默认再点一次才折页成机械短卡（可在设置里关掉二次确认）。成功后会话里是一行可展开的折页提示，样式对齐官方压缩行；展开是左侧细轴时间线，不展示模型摘录原文。
-- 设置页改动即时写入 Host 文档：入境定形、密图、二次确认、入境阈值、密图节省比例。
-- `/compact` 仍是 DSH 的 LLM 摘要，本插件不替换它。
+- 设置页改动即时写入 Host 文档：入境定形、密图、二次确认、替换默认压缩、入境阈值、密图节省比例。
+- **替换默认压缩**（默认关）：`/compact`、自动压缩、溢出恢复都走同一套机械 `summarize` 钩子。不要卸 `@deepseek-ai/dsh-compaction-basic`，本插件只换摘要器，不换引擎。关掉即恢复 LLM checkpoint。
 
 ### 安装
 
@@ -94,7 +94,7 @@ dsh plugin --profile web add github:telagod/dsh-ledger-compact
 
 装完重启 web profile。bundle patch 会插入插件 id `dsh-ledger-compact`。
 
-不要替换 `@deepseek-ai/dsh-compaction-basic`。机械折页只在 `/fast-compact` 期间把该 agent 标进 `summarize` 钩子；其它 `/compact` 与自动摘要仍走 LLM。Web 上 compaction 在 preset isolate 里，host 命令用 `agentPresets.serviceFor(agent, "compaction")` 读该会话的引擎，而不是 `inject: ['compaction']`。
+不要卸 `@deepseek-ai/dsh-compaction-basic`。默认只有 `/fast-compact` 把该 agent 标进 `summarize` 钩子；勾选「替换默认压缩」后，`/compact` 与自动摘要也走机械折页。Web 上 compaction 在 preset isolate 里，host 命令用 `agentPresets.serviceFor(agent, "compaction")` 读该会话的引擎，而不是 `inject: ['compaction']`。
 
 ### 命令
 
