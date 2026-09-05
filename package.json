@@ -1,0 +1,58 @@
+{
+  "name": "dsh-ledger-compact",
+  "version": "0.2.0",
+  "description": "dsh-plugin: OMP-style ingress shaping plus optional local /fast-compact. Dense PNG only when the main model lists image modalities.",
+  "license": "MIT",
+  "author": "telagod",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./ledger": "./lib/ledger.js",
+    "./package.json": "./package.json"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "cordis",
+    "compaction",
+    "context",
+    "fast-compact",
+    "ingress"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/telagod/dsh-ledger-compact.git"
+  },
+  "bugs": {
+    "url": "https://github.com/telagod/dsh-ledger-compact/issues"
+  },
+  "homepage": "https://github.com/telagod/dsh-ledger-compact#readme",
+  "engines": {
+    "node": ">=22"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
+    }
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test lib/ledger.test.js"
+  }
+}

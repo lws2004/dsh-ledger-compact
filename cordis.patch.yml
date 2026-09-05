@@ -1,0 +1,5 @@
+# dsh-ledger-compact: ingress shaping + optional local /fast-compact.
+# Does not replace @deepseek-ai/dsh-compaction-basic.
+- insert:
+    - id: dsh-ledger-compact
+      name: dsh-ledger-compact
