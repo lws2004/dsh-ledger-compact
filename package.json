@@ -50,7 +50,8 @@
     "lib",
     "cordis.patch.yml",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "README.zh.md"
   ],
   "scripts": {
     "test": "node --test lib/ledger.test.js"

@@ -1,8 +1,8 @@
 # dsh-ledger-compact
 
-[English](#english) · [中文](#中文)
+English · [中文](README.zh.md)
 
-**dsh-plugin** for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): OMP / pi-zig / pi-moke style **ingress shaping**, plus an optional local `/fast-compact`. An opt-in setting can also replace DSH's LLM `/compact` and auto-compaction.
+**dsh-plugin** for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). Large tool results are shaped **before** they reach the model. An optional local fold can replace DSH’s LLM `/compact`.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![dsh-plugin](https://img.shields.io/badge/dsh-plugin-111111)](https://github.com/topics/dsh-plugin)
@@ -10,16 +10,19 @@
 
 ---
 
-## English
+## Why
 
-Large tool results are trimmed **before they reach the model**. Messages already in the prefix are left alone. `/fast-compact` is an optional mechanical fold (no model call). Replacing the default compact is **off** until you turn it on.
+Long agent turns dump huge `tool_result` blocks into the next request. DSH already has an excellent LLM compact (`@deepseek-ai/dsh-compaction-basic`), but it costs an extra model call and runs *after* pressure builds.
 
-- **Ingress:** on idle pre-step, excerpt oversized `tool_result` blocks from the **current unsent turn**. Default is text excerpt only — no PNG, no LLM.
-- **Input-bar bolt** is a context pressure meter. A second click (can be disabled) folds history into a mechanical short card. The chat shows an expandable fold line in the same style as the official compact row; the open view is a slim left-axis timeline, not a model summary.
-- Settings write through to the Host document immediately: ingress, dense PNG, confirm-before-fold, replace-default-compact, ingress threshold, PNG savings ratio.
-- **Replace default compact** (off by default): `/compact`, automatic pressure compaction, and overflow recovery all use the same mechanical `summarize` hook. Keep `@deepseek-ai/dsh-compaction-basic` mounted — this plugin does not swap the engine, only the summarizer. Turn it off to restore the LLM checkpoint.
+This plugin does two cheaper things first, and optionally a third:
 
-### Install
+1. **Ingress shaping** — freeze oversized *unsent* tool results into a head/tail excerpt on the idle pre-step. History that already entered the prefix is left alone.
+2. **Mechanical fold** — `/fast-compact` and the input-bar bolt collapse older history into a short ledger card. No model call.
+3. **Replace default compact** *(off)* — reuse the official engine’s `summarize` hook so `/compact`, auto-compaction, and overflow recovery also skip the LLM.
+
+Keep `dsh-compaction-basic` mounted. This plugin does not replace the engine.
+
+## Install
 
 Requires **dsh ≥ 0.1.2-rc.1**.
 
@@ -29,14 +32,40 @@ dsh plugin --profile web add github:telagod/dsh-ledger-compact
 
 Restart the web profile after install. The bundle patch inserts plugin id `dsh-ledger-compact`.
 
-Local checkout (dev):
+From a local checkout:
 
 ```bash
 git clone https://github.com/telagod/dsh-ledger-compact.git
 dsh plugin --profile web add ./dsh-ledger-compact
 ```
 
-### Commands
+## What you get
+
+| Layer | When | Model call | What changes |
+| --- | --- | --- | --- |
+| Ingress shaping | Idle `agent/pre-step` | No | Current unsent `tool_result` only |
+| Bolt / `/fast-compact` | You click or type it | No | Older history → mechanical fold card |
+| Replace default compact | `/compact`, auto, overflow | No | Same official transaction; local summarizer |
+| Official `/compact` | Default DSH path | Yes | LLM `<compacted-summary>` checkpoint |
+
+The input-bar **bolt** is a context-pressure meter. By default it needs a second click before folding (can be turned off). After a fold, the chat shows an expandable row in the same style as the official compact line; the open view is a slim left-axis timeline, not a model essay.
+
+## Settings
+
+Open **Settings → 快速压缩**. Changes write through to the Host document immediately.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| Ingress shaping (`enabled`) | on | Excerpt large unsent `tool_result` blocks before the next request |
+| Allow dense PNG (`snapImages`) | off | Attach a bitmap only when the main model lists `image` in `inputModalities` **and** the image is cheaper than the original |
+| Confirm before fold (`confirmFold`) | on | Bolt requires a second click |
+| Replace default compact (`replaceDefault`) | **off** | `/compact`, automatic pressure compaction, and overflow recovery use the mechanical summarizer |
+| Ingress threshold (`minSnapTokens`) | `3000` | Approximate tokens before an excerpt (or PNG) is considered. Range 200–200000 |
+| PNG savings (`savingsRatio`) | `0.85` | Excerpt + estimated image tokens must be ≤ this fraction of the original |
+
+Turn **Replace default compact** off at any time to restore DSH’s LLM checkpoint. `/fast-compact` stays mechanical either way.
+
+## Commands
 
 ```
 /fast-compact
@@ -45,11 +74,11 @@ dsh plugin --profile web add ./dsh-ledger-compact
 
 There is no vision sidecar. `/fast-compact vision …` was removed.
 
-### Dense PNG
+`/compact` remains the official DSH command. With replace-default **off**, it still calls the model. With it **on**, the same command runs the mechanical fold through the existing engine.
 
-Off by default. Even with “allow dense PNG” checked, a PNG is attached only when the main model's `inputModalities` **explicitly includes `image`**. Models are not guessed by name.
+## Ingress excerpt
 
-Ingress excerpt contract:
+Default is text only — no PNG, no LLM. Already-shaped placeholders are not rewritten. `skill` and `context` tool results are skipped. If `tokenMeter` is missing, ingress is skipped so the plugin never `replace`s without writing `compaction/prune`.
 
 ```
 [Snapcompact: N tokens → excerpt]
@@ -58,56 +87,62 @@ first 16 lines
 last 8 lines
 ```
 
-Default threshold is 3000 tokens. A PNG is attached only if it saves at least 15% versus the original. If `tokenMeter` is missing, ingress is skipped so the plugin never `replace`s without writing `compaction/prune`.
+A PNG is attached only when all of these hold:
 
-### Layout
+- “Allow dense PNG” is on
+- the routed model’s `inputModalities` **explicitly includes `image`** (names like `gpt-4o` are never guessed)
+- excerpt + estimated image tokens ≤ original × savings ratio (default 15% cheaper)
 
-- `lib/ingress.js` — ingress shaping (current unsent `tool_result` only)
-- `lib/vision.js` — dense PNG gated by `inputModalities` + settings
-- `lib/excerpt.js` / `lib/fold.js` / `lib/snapfont.js` — excerpt, mechanical card, PNG
-- `lib/hook.js` — mechanical `summarize` hook on the existing compaction engine
-- `lib/index.js` — command, settings, pre-step hook
-- `lib/client.js` — pressure chip, expandable fold card, settings page
+## Fold card
+
+Mechanical, no model. Prior fold placeholders and `<compacted-summary>` blocks are dropped, not nested.
+
+```
+[Snapcompact] Fold ~N tok. Exact file bytes are not stored — re-read with offset/limit if a detail matters.
+FILES
+- [edit] path
+- [read] path
+INTENTS
+- recent user goals
+TOOLS
+- read 4
+COMMANDS
+- …
+ERRORS
+- …
+EXCERPT
+[user] …
+[tool] …
+```
+
+This is cheaper and more predictable than an LLM checkpoint. It also keeps less prose: paths, intents, tool counts, and a short excerpt — not a narrative of *why*.
+
+## Working with DSH compact
+
+Do **not** unmount `@deepseek-ai/dsh-compaction-basic`.
+
+- Pressure, range selection, shrink checks, and durable `compaction/*` events stay on the official engine.
+- This plugin only wraps `summarize()`.
+- `/fast-compact` marks the current agent for one `compactNow()` so other sessions keep the LLM path.
+- Replace-default is a live setting: every hooked engine uses the mechanical summarizer until you turn it off (or unload the plugin).
+
+On web, compaction lives in the preset isolate. Host code reads it with `agentPresets.serviceFor(agent, "compaction")`, not `inject: ['compaction']`.
+
+## Develop
 
 ```bash
 node --test lib/ledger.test.js
 ```
 
----
-
-## 中文
-
-对齐 OMP / pi-zig / pi-moke **入境定形**：大工具结果在进模型前裁成摘录，已经进过前缀的旧消息不回头改。`/fast-compact` 仍是可选的本地机械折页。替换默认压缩默认关闭。
-
-- 入境：空闲步进前裁**当前回合尚未发送**的大 `tool_result`。默认只摘录，不打图、不调模型。
-- 输入栏闪电是**上下文压力表**。默认再点一次才折页成机械短卡（可在设置里关掉二次确认）。成功后会话里是一行可展开的折页提示，样式对齐官方压缩行；展开是左侧细轴时间线，不展示模型摘录原文。
-- 设置页改动即时写入 Host 文档：入境定形、密图、二次确认、替换默认压缩、入境阈值、密图节省比例。
-- **替换默认压缩**（默认关）：`/compact`、自动压缩、溢出恢复都走同一套机械 `summarize` 钩子。不要卸 `@deepseek-ai/dsh-compaction-basic`，本插件只换摘要器，不换引擎。关掉即恢复 LLM checkpoint。
-
-### 安装
-
-需要 **dsh ≥ 0.1.2-rc.1**。
-
-```bash
-dsh plugin --profile web add github:telagod/dsh-ledger-compact
-```
-
-装完重启 web profile。bundle patch 会插入插件 id `dsh-ledger-compact`。
-
-不要卸 `@deepseek-ai/dsh-compaction-basic`。默认只有 `/fast-compact` 把该 agent 标进 `summarize` 钩子；勾选「替换默认压缩」后，`/compact` 与自动摘要也走机械折页。Web 上 compaction 在 preset isolate 里，host 命令用 `agentPresets.serviceFor(agent, "compaction")` 读该会话的引擎，而不是 `inject: ['compaction']`。
-
-### 命令
-
-```
-/fast-compact
-/fast-compact status
-```
-
-没有 vision sidecar。旧的 `/fast-compact vision …` 已删除。
-
-### 密图
-
-默认关。即使勾选「允许密图」，也只在主模型 `inputModalities` **明确含 `image`** 时才可能贴 PNG。不按模型名字猜。
+| File | Role |
+| --- | --- |
+| `lib/ingress.js` | Current-turn `tool_result` shaping |
+| `lib/vision.js` | Dense PNG gated by `inputModalities` + settings |
+| `lib/excerpt.js` / `lib/fold.js` / `lib/snapfont.js` | Excerpt, fold card, bitmap |
+| `lib/hook.js` | Mechanical `summarize` hook |
+| `lib/resolve.js` | Find isolated compaction engines |
+| `lib/index.js` | Command, settings, pre-step |
+| `lib/client.js` | Bolt, fold row, settings page |
 
 ## License
 
