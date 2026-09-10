@@ -127,7 +127,14 @@ Two things below are measured, not assumed:
 - A full frame costs about **$0.00013**; the same content as raw text costs $0.001–$0.014 — **10–100x more**.
 - Fidelity has a ceiling: even unresized, roughly 20% of **exact values** (coordinates, IPs, status codes) are misread. Exact bytes therefore stay in the text excerpt and the re-readable source; the image carries bulk and structure. That is exactly why the `re-read with offset/limit` contract exists.
 
-`bench/report.md` holds the raw run (fixtures × layout variants × checkable questions, answers and `usage` cached).
+`bench/report.md` holds the raw run (fixtures × layout variants × checkable questions, answers and `usage` cached); `bench/FINDINGS.md` holds the method, the noise floor and a verdict per axis. In short:
+
+- **Draw inside the request pixel budget**: identical content answered 1–2 of 10 when the pipeline resized it, 8 of 10 drawn natively, for the same bill.
+- **Packing** carries ~20x more lines per frame at equal accuracy.
+- **A source line number on every row** lifted exact-value accuracy from 73% to 87% at no token or capacity cost — it aims straight at the dominant error class, reading the wrong line.
+- **Colour was tried and rejected**: four palettes, paired 3-repeat run over 60 samples each — grayscale 46/60, colour 44/60, value accuracy identical. The encoder (`encodePngPalette`) and per-cell/per-digit ink stay in the library, off by default.
+- **Prompt legend, roomier cells, single column as default**: measured, none earned its cost.
+- **Ceiling**: about a quarter of exact-value questions are still misread in the best configuration. The image is an index, not a notary — exact bytes travel as text, in the fold card, or through `offset/limit` re-reads.
 
 ## Fold card
 

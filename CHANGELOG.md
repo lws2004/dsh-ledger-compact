@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.8.0
+
+An exploration loop around the layout, and the measured answer to "can we do better?".
+
+### Added
+
+- **`bench/FINDINGS.md`** — method, noise floor and verdicts for every axis tried.
+- **`--repeats N`** in the fidelity bench: the endpoint is stochastic, so one sample per
+  question cannot resolve an effect below ~15%; paired repeats can.
+- **`encodePngPalette`** (colour-type-3 PNG, same byte-per-pixel payload as the gray
+  encoder) plus per-cell and per-digit ink options on `rasterGrid`. The colour channel is
+  wired and tested; it is simply not enabled, because it measured as no gain.
+- A degenerate-frame guard in the bench: a frame that lost its ink now fails loudly
+  instead of being scored as a fidelity failure.
+
+### Changed
+
+- **The source-line ruler now prints on every grid row** (`gutterEvery: 1`). It cost
+  nothing in tokens or capacity and lifted exact-value accuracy from 73% to 87% in the
+  round that introduced it — consistent with the dominant error class, reading the wrong
+  line.
+
+### Measured, not shipped
+
+- **Colour**: blue rules, blue digits, red alert lines, in four palettes. Paired
+  3-repeat run over 60 samples: grayscale 46/60, colour 44/60, value accuracy identical.
+  Rejected — no gain, added provider risk.
+- **Prompt legend**, **roomier cells**, **single column as default**: each measured, none
+  earned its cost.
+- **Residual ceiling**: ~76% of exact-value questions are answered correctly even in the
+  best configuration. The image is an index, not a notary; exact bytes stay in the text
+  excerpt, the fold card and the re-read path.
+
 ## 0.7.0
 
 Priced against the model that actually reads the frames (deepseek-flash), and measured.
