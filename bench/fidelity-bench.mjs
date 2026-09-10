@@ -26,7 +26,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { planGrid } from "../lib/layout.js";
-import { deepseekImageTokens, maxRows, previewSize, raster, rasterGrid, resolveShape } from "../lib/snapfont.js";
+import { deepseekImageTokens, maxRows, parseAsciiAtlas, previewSize, raster, rasterGrid, resolveShape, setAsciiAtlas } from "../lib/snapfont.js";
 import { encodePngGray, encodePngPalette } from "../lib/png.js";
 import { formatUsd, priceFor, requestPreviewSize, usdFor } from "../lib/pricing.js";
 import { estTokensUtf8 } from "../lib/tokens.js";
@@ -187,6 +187,19 @@ function colored(cellW, cellH, palette, options = {}) {
   };
 }
 
+/** Swap the ASCII atlas for one rendered from a TTF (tools/make-atlas.py). */
+function atlasVariant(path) {
+  const atlas = parseAsciiAtlas(readFileSync(path));
+  return (text, lines) => {
+    setAsciiAtlas(atlas);
+    try {
+      return packed(8, 16, { gutterEvery: 1 })(text, lines);
+    } finally {
+      setAsciiAtlas(null);
+    }
+  };
+}
+
 /** Post-process a rendered frame: same content, different effective resolution. */
 function rescaled(factor, upscaleBack = false) {
   return (text, lines) => {
@@ -228,6 +241,10 @@ const VARIANTS = {
   /** The same renderer at a larger request-image budget (set --budget to match). */
   "budget-1.3m": { build: packed(8, 16, { gutterEvery: 1 }), legend: false, budget: 1300000 },
   "budget-2.1m": { build: packed(8, 16, { gutterEvery: 1 }), legend: false, budget: 2100000 },
+  /** Same 8x13 cell, glyphs rendered from an outline font instead of X.org 8x13. */
+  "font-dejavu": { build: atlasVariant(join(here, "atlas", "dejavu-mono-11.bin")), legend: false },
+  "font-dejavu-bold": { build: atlasVariant(join(here, "atlas", "dejavu-mono-bold-11.bin")), legend: false },
+  "font-jetbrains": { build: atlasVariant(join(here, "atlas", "jetbrains-mono-11.bin")), legend: false },
   /** Resolution isolation: identical content and layout, fewer pixels per glyph. */
   "res-50": { build: rescaled(0.5), legend: false },
   "res-50-up": { build: rescaled(0.5, true), legend: false },

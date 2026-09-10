@@ -83,6 +83,31 @@ That yields the three regimes the layout has to respect:
    not touch: wrong-row selection and dropped digits, the class the per-row ruler improved
    from 73% to 87%.
 
+## The glyph design does not move accuracy at a fixed size
+
+Four atlases in the same 8x13 cell (X.org 8x13, DejaVu Sans Mono 11, DejaVu Sans Mono Bold
+11, JetBrains Mono 11 — the last three rendered by `tools/make-atlas.py`), screening run
+n=20, then a paired 3-repeat confirmation for the leader:
+
+| variant | screening | paired (n=60) | value acc | $/correct |
+| --- | --- | --- | --- | --- |
+| X.org 8x13 (shipped) | 14/20 | **46/60** | 76% | $0.000175 |
+| DejaVu Sans Mono Bold 11 | 17/20 | **46/60** | 78% | $0.000175 |
+| DejaVu Sans Mono 11 | 16/20 | — | 87% (n=20) | $0.000167 |
+| JetBrains Mono 11 | 14/20 | — | 73% (n=20) | $0.000191 |
+
+The screening's +3 answers were noise, exactly as the noise floor predicted. At a fixed
+cell size a different glyph design trades shape for ink — the TTF renders carry slightly
+less ink in an 8x13 box than the purpose-built terminal bitmap — and lands neutral. This is
+the resolution result again from the other side: **the encoder reads pixels per glyph, not
+penmanship**. The shipped atlas is therefore unchanged.
+
+What is still untested is the other half of the idea: a **larger glyph** (e.g. a 10x16 atlas
+in a 10x18 cell). Per the resolution law that is the direction that should move accuracy,
+and its price is capacity — 640k px buys 4992 cells at 8x16 against 3555 at 10x18 (-29%),
+for +44% glyph pixels. `tools/make-atlas.py` and the `--show` glyph dump make that a
+one-afternoon experiment; the loader needs a width/height-aware atlas magic first.
+
 ## The residual ceiling
 
 Even in the shipped configuration roughly **a quarter of exact-value questions are

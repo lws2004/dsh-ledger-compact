@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.10.0
+
+Fonts were tried. The shipped glyphs did not change, because measuring said not to.
+
+### Added
+
+- **`tools/make-atlas.py`** — renders a TTF into the plugin's F8X13 bitmap atlas
+  (`--show` dumps glyphs as ASCII art), so the font question is reproducible rather than
+  folklore.
+- **`setAsciiAtlas` / `parseAsciiAtlas`** — a seam to render ASCII from an alternative
+  atlas; used by the bench, available to tests.
+- Candidate atlases under `bench/atlas/` (DejaVu Sans Mono 11 regular and bold, JetBrains
+  Mono 11) and three `font-*` bench variants.
+
+### Measured
+
+- **A different glyph design at the same 8x13 size is neutral.** Screening (n=20) put
+  DejaVu Bold three answers ahead; the paired 3-repeat confirmation (n=60 each) came out
+  **46/60 vs 46/60**. Value accuracy 76% vs 78%. The shipped X.org atlas stays.
+- Why: at a fixed cell the design trades shape for ink, and the encoder reads pixels per
+  glyph. The untested half of the idea — a *larger* glyph, e.g. 10x16 in a 10x18 cell —
+  costs 29% of capacity for 44% more glyph pixels, and now takes one bench run to settle.
+
 ## 0.9.0
 
 The request-image budget became a setting, because it turned out to be a knob worth
