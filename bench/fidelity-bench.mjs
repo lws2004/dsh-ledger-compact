@@ -26,7 +26,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { planGrid } from "../lib/layout.js";
-import { deepseekImageTokens, maxRows, parseAsciiAtlas, previewSize, raster, rasterGrid, resolveShape, setAsciiAtlas } from "../lib/snapfont.js";
+import { deepseekImageTokens, maxRows, parseAsciiAtlas, previewSize, raster, rasterGrid, resolveShape, setAsciiAtlas, setDigitAtlas } from "../lib/snapfont.js";
 import { encodePngGray, encodePngPalette } from "../lib/png.js";
 import { formatUsd, priceFor, requestPreviewSize, usdFor } from "../lib/pricing.js";
 import { estTokensUtf8 } from "../lib/tokens.js";
@@ -125,6 +125,29 @@ function fixtures() {
       { kind: "structure", q: "前 10 批里有几批的队列剩余是 0？只回答数字。", a: "1" }
     ]
   });
+
+  /**
+   * The residual error class, made measurable: rows that differ only in their digits,
+   * and values that sit far from the row's ruler. Answerable from the first 39 source
+   * lines, like every other fixture.
+   */
+  out.push((() => {
+    const idOf = (i) => 1000000 + ((i * 37) % 9000000);
+    const qtyOf = (i) => (i * 13) % 1000;
+    const unitOf = (i) => 100 + ((i * 7) % 900);
+    const row = (i) => "id=" + idOf(i) + " user=u" + (i % 97) + " qty=" + qtyOf(i) + " unit=$" + unitOf(i);
+    return {
+      name: "id-grid",
+      lines: ["ID-GRID rows=1500 (id, user, qty, unit)", ...Array.from({ length: 1500 }, (_, i) => row(i))],
+      qa: [
+        { kind: "value", q: "What is the qty on the row whose user is u17?", a: String(qtyOf(17)) },
+        { kind: "value", q: "What is the id on the row whose user is u30?", a: String(idOf(30)) },
+        { kind: "value", q: "What is the unit price on the row whose id is " + idOf(23) + "?", a: String(unitOf(23)) },
+        { kind: "value", q: "What is the id two rows below the row whose user is u8?", a: String(idOf(10)) },
+        { kind: "structure", q: "How many of these four rows have qty above 100: user=u3, user=u9, user=u15, user=u21? Answer with a number.", a: String([3, 9, 15, 21].filter((i) => qtyOf(i) > 100).length) }
+      ]
+    };
+  })());
   return out;
 }
 
@@ -149,14 +172,60 @@ function budgetShape(cellW, cellH) {
   return { ...BASE, name: "budget", cellW, cellH, cols, frameW, frameH };
 }
 
-function packed(cellW, cellH, layout = {}) {
+function packed(cellW, cellH, layout = {}, rasterOptions = undefined) {
   return (text, lines) => {
     const shape = budgetShape(cellW, cellH);
     const plan = planGrid(lines, shape, layout);
-    const framed = rasterGrid(plan, shape, maxRows(estTokensUtf8(text), 0, shape));
+    const framed = rasterGrid(plan, shape, maxRows(estTokensUtf8(text), 0, shape), rasterOptions);
     return { framed, shape, note: layoutNote(plan, framed) };
   };
 }
+
+/**
+ * Alternating grid-row shading. The left ruler anchors a row at its first column; a
+ * value 120 columns away has nothing tying it to that row. A shade band costs no cells.
+ */
+function zebra(cellW, cellH, layout = {}) {
+  return packed(cellW, cellH, layout, { rowPaper: (r) => (r % 2 ? 236 : 245) });
+}
+
+/** Draw the digits from a second atlas — bolder, or from a bigger box. Same cells. */
+function digitVariant(file, cellW, cellH, layout = {}, build = packed) {
+  const digits = parseAsciiAtlas(readFileSync(join(here, "atlas", file)));
+  if (!digits.w) throw new Error("unreadable atlas: " + file);
+  const base = build(cellW, cellH, layout);
+  return (text, lines) => {
+    setDigitAtlas(digits);
+    try {
+      return base(text, lines);
+    } finally {
+      setDigitAtlas(null);
+    }
+  };
+}
+
+/**
+ * Every digit run of five or more gets a space every three digits, so a long value
+ * reads as groups a human (or an encoder) can hold: 48213 -> "48 213". Shorter runs are
+ * left alone; the bench's matcher ignores whitespace, and the notice still carries the
+ * exact bytes.
+ */
+const groupDigits = (line) => String(line).replace(/\d{5,}/g, (run) => run.replace(/\B(?=(\d{3})+$)/g, " "));
+
+function grouped(cellW, cellH, layout = {}, transform = groupDigits) {
+  const base = packed(cellW, cellH, layout);
+  return (text, lines) => base(text, lines.map(transform));
+}
+
+/**
+ * The same chunking with a visible separator. A space inside a number is ambiguous in a
+ * packed grid — it can read as a column boundary — so this is the version that cannot be
+ * mistaken for one: 48213 -> "48,213", 1000074 -> "1,000,074".
+ */
+const commaDigits = (line) => String(line).replace(/\d{5,}/g, (run) => run.replace(/\B(?=(\d{3})+$)/g, ","));
+
+/** Points at the split the measurements found: image for bulk, text for exact values. */
+const TRUST_HINT = "The image is a frozen preview of the text above it. For exact values — ids, counts, byte counts, timings, status codes — prefer the text; use the image for structure and for what the text elided.";
 
 const LEGEND = "Image legend: the picture is a text grid; vertical rules separate columns; the left gutter prints the SOURCE line number every few rows; reading order is left to right, then top to bottom.";
 
@@ -239,6 +308,16 @@ function padded(frameW, frameH) {
   };
 }
 
+/**
+ * The shipped shape: the same notice, with the head/tail excerpt the plugin actually
+ * sends underneath it. Every other variant here asks the image alone, which is a lower
+ * bound on what production sees — and the questions whose answers sit in the first 16
+ * or last 8 lines are exactly the ones the image keeps failing.
+ */
+function withExcerpt(build, options = undefined) {
+  return (text, lines) => ({ ...build(text, lines), excerpt: snapExcerpt(text, options) });
+}
+
 /** Each variant turns one axis: geometry, layout, prompt legend, ink colour, or budget. */
 const VARIANTS = {
   ruler1: { build: packed(8, 16, { gutterEvery: 1 }), legend: false },
@@ -259,6 +338,22 @@ const VARIANTS = {
    * capacity and layout. glyph-8x16-lead buys a pixel of leading for 13% of the
    * rows; glyph-9x15 is the wider box at -7% capacity.
    */
+  /**
+   * Exact-value arms, all free in cells and tokens unless noted: shading rows, a
+   * bolder or bigger digit box, and grouping long digit runs.
+   */
+  "excerpt": { build: withExcerpt(packed(8, 16, { gutterEvery: 1 })), legend: false },
+  /** The excerpt window itself: the shipped head is 16 lines, everything is clamped to 2400 bytes. */
+  "excerpt-32": { build: withExcerpt(packed(8, 16, { gutterEvery: 1 }), { headLines: 32 }), legend: false },
+  /** Same frame and excerpt, but told which channel to trust for exact values. */
+  "excerpt-hint": { build: withExcerpt(packed(8, 16, { gutterEvery: 1 })), legend: false, hint: TRUST_HINT },
+  "zebra": { build: zebra(8, 16, { gutterEvery: 1 }), legend: false },
+  "digit-bold": { build: digitVariant("xorg-8x13-bold-digits.bin", 8, 16, { gutterEvery: 1 }), legend: false },
+  /** Both free arms at once: the ship candidate if either mechanism is real. */
+  "zebra-bold": { build: digitVariant("xorg-8x13-bold-digits.bin", 8, 16, { gutterEvery: 1 }, zebra), legend: false },
+  "digit-big": { build: digitVariant("xorg-8x16.bin", 8, 16, { gutterEvery: 1 }), legend: false },
+  "digit-group": { build: grouped(8, 16, { gutterEvery: 1 }), legend: false },
+  "digit-comma": { build: grouped(8, 16, { gutterEvery: 1 }, commaDigits), legend: false },
   "glyph-8x16": { build: atlasVariant("xorg-8x16.bin"), legend: false },
   "glyph-8x16-lead": { build: atlasVariant("xorg-8x16.bin", 8, 18), legend: false },
   "glyph-9x15": { build: atlasVariant("xorg-9x15.bin"), legend: false },
@@ -398,7 +493,8 @@ for (const fixture of all) {
   for (const variant of variants) {
     const spec = VARIANTS[variant];
     activeBudget = spec.budget ?? BUDGET;
-    const { framed, note, palette } = spec.build(text, fixture.lines);
+    const built = spec.build(text, fixture.lines);
+    const { framed, note, palette } = built;
     if (!framed || calls >= MAX_CALLS) continue;
     if (DUMP) {
       const dir = join(here, ".cache", "dump");
@@ -435,7 +531,9 @@ for (const fixture of all) {
     const carried = framed.sourceLines ?? (framed.gridRows !== undefined ? framed.gridRows * (framed.columns ?? 1) : framed.rows);
     for (const qa of fixture.qa) {
       if (calls >= MAX_CALLS) break outer;
-      const prompt = (spec.legend ? LEGEND + "\n" : "") + notice + "\nQuestion: " + qa.q + "\nAnswer with only the answer.";
+      const prompt = (spec.hint ? spec.hint + "\n" : "") + (spec.legend ? LEGEND + "\n" : "") + notice +
+        (built.excerpt ? "\n" + built.excerpt : "") +
+        "\nQuestion: " + qa.q + "\nAnswer with only the answer.";
       for (let repeat = 0; repeat < REPEATS; repeat++) {
         // Repeat 0 keeps the plain key, so earlier single-sample runs are reused as-is.
         const parts = [MODEL, variant, fixture.name, qa.q, dataUri];

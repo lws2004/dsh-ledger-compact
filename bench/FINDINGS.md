@@ -32,6 +32,8 @@ is cached; results live in `bench/report.md`, raw usage included.
 | **Colour** | paired 3-repeat run, 60 samples per variant: grayscale 46/60 vs blue-chrome + blue-digits 44/60 (value accuracy identical at 76%). Round 2's 5-palette spread (12–16/20) is the same noise | **rejected** — no gain, and it adds chroma-subsampling risk on a channel that is currently provider-agnostic |
 | **A different glyph design** (DejaVu/JetBrains in the same 8x13 box) | paired 3-repeat run, 60 samples per variant: 46/60 vs 46/60 | **rejected** — the encoder reads pixels per glyph, not penmanship |
 | **A larger glyph** (X.org 8x16 in the *same* 8x16 cell: +56% ink per character, same 39 rows and token bill) | screening 17/20 vs 14/20, then paired 3-repeat 60 samples per variant: **46/60 vs 46/60** | **rejected** — above the legibility floor, pixels buy capacity, not accuracy |
+| **Seven fixes for the residual exact-value class** (row shading, bolder digits, bigger digit box, whitespace grouping, comma grouping, a deeper excerpt window, a trust hint in the prompt) | seven paired runs, 75–150 samples per arm | **rejected** — nothing beat the noise floor; digit grouping was measurably worse |
+| **The head/tail excerpt beside the image** (what the plugin actually sends; the bench had only ever measured the image alone) | paired 3-repeat, 75 questions per arm: value accuracy 70% → **91%** (net +12/57, p=0.002), 447 → 1000 tokens | **confirmed and shipped** — it rescues exactly the questions the image cannot answer, and a wider window adds nothing |
 
 Colour is not removed from the library: `encodePngPalette` and the per-cell /
 per-digit ink options stay, tested and ready, should a future model show a gain.
@@ -158,20 +160,75 @@ can open, `--show` to eyeball glyphs before spending a call) and the
 `parseAsciiAtlas`/`setAsciiAtlas` seam — so the next font question is a bench run
 rather than a rewrite.
 
-## The residual ceiling
+## The residual exact-value class, measured from both sides
 
 Even in the shipped configuration roughly **a quarter of exact-value questions are
-misread** (76% value accuracy over 60 paired samples). The failures cluster:
+misread** (76% value accuracy over 60 paired samples). The failures cluster: multi-digit
+values losing or swapping a digit (`48213` → `4823`, `143` → `147`), picking a
+neighbouring row when the question names a field rather than a position (`503` → `200`),
+and reading-order questions on a packed numeric grid.
 
-- multi-digit values losing or swapping a digit (`48213` → `4823`, `143` → `147`);
-- picking a neighbouring row when the question names a field rather than a position
-  (`503` → `200`, one row's IP for another's);
-- reading-order questions on a 20-column numeric grid.
+`id-grid` — 1500 near-identical `id=1000074 user=u2 qty=26 unit=$114` rows — was added to
+measure that class on its own. Control, six samples per question:
 
-That is a property of the channel, not of the layout: **an image is a good index and a
-bad notary**. The plugin therefore keeps exact bytes out of the image's critical path —
-the text excerpt carries the head and tail, the fold card carries files/intents/errors,
-and `re-read with offset/limit` recovers any exact byte from the source.
+| question | control |
+| --- | --- |
+| the unit price on the row whose **id is 1000851** (a literal to match) | 6/6 |
+| the qty on the row whose **user is u17** (a literal to match) | 5/6 |
+| the **id** on the row whose user is u30 (7 digits to transcribe) | **0/6** |
+| the **id** two rows below the row whose user is u8 (7 digits, after counting) | **0/6** |
+| how many of four named rows have qty above 100 | **0/6** |
+| the byte count at the end of the `items/5` line | **0/6** |
+| `seed=48213` on the first line (old fixture) | **0/6** |
+
+Matching a literal and reading a short neighbouring field works. Transcribing five or more
+digits does not — not at a rate, but as a wall.
+
+### Seven fixes did nothing
+
+Six change the frame, one changes the prompt:
+
+| arm | mechanism | screening (n=25) | paired |
+| --- | --- | --- | --- |
+| `zebra` | alternate grid-row shading, so a value 120 columns from the ruler still belongs to a visible band | 18 vs 16 | net −7/150 (p=0.26), value −4/114 |
+| `digit-bold` | digits from a 1px-thicker copy of the same face | 18 vs 16 | net +3/150, value +5/114 (p=0.36) |
+| `digit-big` | digits from the 8x16 face, same cell | 16 vs 16 | — |
+| `digit-group` | a space every three digits in 5+ digit runs (`48 213`) | 15 vs 16 | — |
+| `digit-comma` | the same chunking with an unambiguous separator (`48,213`, `1,000,074`) | — | 48/75 vs 52/75 — and two questions the control answered 3/3 fell to 0/3 |
+| `excerpt-32` | the shipped excerpt with a 32-line head instead of 16 | — | +1/75 (p=1.00) for 13% more tokens |
+| `excerpt-hint` | the excerpt plus a line in the prompt saying which channel to trust for exact values | — | +2/75 (p=0.75): structure +3/18, value −1/57 |
+
+The shading survives the wire JPEG untouched (245/236 bands in the encoded image), so the
+null result is not a wire artifact. The comma separator was the sharpest test of the
+chunking idea — `id=1,000,074` cannot be mistaken for three fields — and it failed on its
+own target: `48213` still 0/3, the 7-digit ids still 0/3.
+
+### The excerpt does the work, and 16 lines is already enough
+
+Every variant above is asked *without* the head/tail excerpt the plugin really sends. The
+same images and questions, with it:
+
+| configuration | all | value | structure | measured tokens | $/answer |
+| --- | --- | --- | --- | --- | --- |
+| image only | 52/75 | 40/57 (70%) | 12/18 | 447 | $0.000134 |
+| **image + excerpt (shipped)** | **62/75** | **52/57 (91%)** | 10/18 | 1000 | $0.000300 |
+| image + a 32-line head | 63/75 | 53/57 (93%) | 10/18 | 1135 | $0.000341 |
+
+The excerpt is worth **+21.1 points of value accuracy** (net +12 of 57, 95% CI [+9.4,
++32.7], p=0.002), and it rescues exactly the questions the image cannot answer: the
+`seed=48213` line, the `items/5` byte count and the `items/5` client IP are each 0/3 from
+the image and 3/3 with the excerpt. That is the plugin's thesis with a number on it — the
+image carries bulk and structure, the text carries exact values — and it is still cheap:
+1000 tokens per answer, $0.000300, against $0.001044 for the same content as raw text.
+
+Widening the window buys nothing (+1 of 75, p=1.00) for 13% more tokens, and the questions
+that still fail are not failing for lack of text: reading a 7-digit value off a named row
+is 0/6 with the excerpt too.
+
+**Verdict: nothing changes.** The rendering search is closed, the shipped 16/8 excerpt
+stays, and a question whose answer is a 5+ digit value or the tail field of a dense line
+belongs in text — which is what the notice, the fold card and the `offset/limit` re-read
+contract already do.
 
 ## Rule for the next change
 

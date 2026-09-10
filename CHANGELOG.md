@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.12.0
+
+The residual exact-value class was attacked directly, with the six rendering fixes that
+looked most plausible. None of them moved it. What does move it — the head/tail excerpt the
+plugin already sends — had never been measured, and now is: **+21 points of value
+accuracy**.
+
+### Added
+
+- **`id-grid` fixture** — 1500 near-identical `id=1000074 user=u2 qty=26 unit=$114` rows,
+  so "find the row and read the value" is measurable separately from "read the picture".
+  It is the hardest fixture in the bench, and it shows the class as a wall rather than a
+  rate: 7-digit values 0/6, `seed=48213` 0/6, while literal-key questions are 5–6/6.
+- **A digits-only atlas seam** (`setDigitAtlas`) and **row banding** (`rasterGrid`'s
+  `rowPaper`), plus `--bold-range` in `tools/make-atlas.py` — off by default, tested, and
+  the arms that used them are in the bench even though they were rejected.
+- **`excerpt` / `excerpt-32` bench arms**: the bench can now measure the configuration the
+  plugin actually sends (notice + excerpt + image) instead of only the image.
+
+### Measured
+
+- **Seven fixes for the residual class all landed inside the noise**: row shading (net
+  −7/150), bolder digits (+3/150; value +5/114, p=0.36), a bigger digit box (16/25 vs
+  16/25), whitespace digit grouping (15/25 vs 16/25), comma grouping (48/75 vs 52/75 — and
+  it broke two questions the control answered 3/3), a 32-line excerpt head (+1/75), and a
+  prompt line saying which channel to trust (+2/75, p=0.75).
+- **The shipped excerpt is worth +21.1 points of value accuracy** (70% → 91%; net +12 of 57,
+  95% CI [+9.4, +32.7], p=0.002) for 447 → 1000 measured tokens per answer — still 3.5x
+  cheaper than the same content as text. It rescues exactly the questions the image fails:
+  `seed=48213`, the `items/5` byte count, the `items/5` client IP, each 0/3 from the image
+  and 3/3 with the excerpt.
+- **A wider excerpt window is not worth its tokens**: a 32-line head buys +1 of 75 (p=1.00)
+  for 13% more. `SNAP_HEAD_LINES` stays 16.
+
 ## 0.11.0
 
 The other half of the font question was measured and answered: a **larger glyph box** does

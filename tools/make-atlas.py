@@ -36,13 +36,13 @@ def open_font(path, size):
     return ImageFont.truetype(path, size)
 
 
-def glyph_image(font, cp, cell, baseline, bold_px):
+def glyph_image(font, cp, cell, baseline, bold_px, bold_range=None):
     cellW, cellH = cell
     ascent, _descent = font.getmetrics()
     top = (ascent if baseline is None else baseline) - ascent
     img = Image.new("1", (cellW, cellH), 0)
     ImageDraw.Draw(img).text((0, top), chr(cp), font=font, fill=1)
-    if bold_px:
+    if bold_px and (bold_range is None or bold_range[0] <= cp <= bold_range[1]):
         px = img.load()
         shifted = img.copy()
         sp = shifted.load()
@@ -84,7 +84,7 @@ def codepoints_from(atlas):
     raise SystemExit(atlas + ": not an atlas")
 
 
-def build(path, size, first, last, cell, baseline, bold_px, cps_from=""):
+def build(path, size, first, last, cell, baseline, bold_px, cps_from="", bold_range=None):
     font = open_font(path, size)
     cps, blobs = [], []
     for cp in (codepoints_from(cps_from) if cps_from else range(first, last + 1)):
@@ -95,7 +95,7 @@ def build(path, size, first, last, cell, baseline, bold_px, cps_from=""):
         except Exception:
             continue
         cps.append(cp)
-        blobs.append(pack_rows(glyph_image(font, cp, cell, baseline, bold_px), cell))
+        blobs.append(pack_rows(glyph_image(font, cp, cell, baseline, bold_px, bold_range), cell))
     out = bytearray(MAGIC)
     out += struct.pack("<BBH", cell[0], cell[1], 0)
     out += struct.pack("<I", len(cps))
@@ -106,15 +106,16 @@ def build(path, size, first, last, cell, baseline, bold_px, cps_from=""):
     return bytes(out)
 
 
-def show(path, size, chars, cell, baseline):
+def show(path, size, chars, cell, baseline, bold_px=0, bold_range=None):
     font = open_font(path, size)
     ascent, descent = font.getmetrics()
-    print("--- %s @%s  cell %dx%d  ascent %d descent %d  baseline %s"
+    print("--- %s @%s  cell %dx%d  ascent %d descent %d  baseline %s%s"
           % (path.split("/")[-1], size, cell[0], cell[1], ascent, descent,
-             ascent if baseline is None else baseline))
+             ascent if baseline is None else baseline,
+             "  bold %dpx in %s" % (bold_px, bold_range) if bold_px else ""))
     for ch in chars:
         try:
-            img = glyph_image(font, ord(ch), cell, baseline, 0)
+            img = glyph_image(font, ord(ch), cell, baseline, bold_px, bold_range)
         except Exception as exc:
             print("  %r failed: %s" % (ch, exc))
             continue
@@ -177,6 +178,7 @@ if __name__ == "__main__":
     ap.add_argument("--last", type=int, default=255)
     ap.add_argument("--baseline", type=int, default=None)
     ap.add_argument("--bold-px", type=int, default=0)
+    ap.add_argument("--bold-range", default="", help="only thicken codepoints in LO-HI, e.g. 48-57 for digits")
     ap.add_argument("--show", action="store_true")
     ap.add_argument("-c", "--chars", default="0OIl1gq8B")
     ap.add_argument("--check-legacy", default="")
@@ -193,11 +195,16 @@ if __name__ == "__main__":
     elif a.check_legacy:
         sys.exit(check_legacy(a.font, a.check_legacy, a.baseline, a.bold_px))
     elif a.show:
-        show(a.font, a.size, a.chars, cell, a.baseline)
+        show(a.font, a.size, a.chars, cell, a.baseline, a.bold_px,
+             tuple(int(v) for v in a.bold_range.split("-")) if a.bold_range else None)
     else:
         if not a.out:
             raise SystemExit("OUT.bin is required")
-        data = build(a.font, a.size, a.first, a.last, cell, a.baseline, a.bold_px, a.cps_from)
+        bold_range = None
+        if a.bold_range:
+            lo, hi = a.bold_range.split("-")
+            bold_range = (int(lo), int(hi))
+        data = build(a.font, a.size, a.first, a.last, cell, a.baseline, a.bold_px, a.cps_from, bold_range)
         open(a.out, "wb").write(data)
         n = struct.unpack_from("<I", data, 12)[0]
         print("wrote %s (%dx%d, %d glyphs, %d bytes)" % (a.out, cell[0], cell[1], n, len(data)))
