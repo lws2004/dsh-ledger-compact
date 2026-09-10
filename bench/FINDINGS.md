@@ -30,6 +30,8 @@ is cached; results live in `bench/report.md`, raw usage included.
 | Roomier cells (cellW 10, cellH 20) | 15/20 vs 14/20 control, but 481 vs 761 lines/frame | rejected |
 | Single column | 17/20 vs 17/20 control, 39 vs 761 lines/frame | rejected as a default (it is the right shape only when lines are long and few) |
 | **Colour** | paired 3-repeat run, 60 samples per variant: grayscale 46/60 vs blue-chrome + blue-digits 44/60 (value accuracy identical at 76%). Round 2's 5-palette spread (12–16/20) is the same noise | **rejected** — no gain, and it adds chroma-subsampling risk on a channel that is currently provider-agnostic |
+| **A different glyph design** (DejaVu/JetBrains in the same 8x13 box) | paired 3-repeat run, 60 samples per variant: 46/60 vs 46/60 | **rejected** — the encoder reads pixels per glyph, not penmanship |
+| **A larger glyph** (X.org 8x16 in the *same* 8x16 cell: +56% ink per character, same 39 rows and token bill) | screening 17/20 vs 14/20, then paired 3-repeat 60 samples per variant: **46/60 vs 46/60** | **rejected** — above the legibility floor, pixels buy capacity, not accuracy |
 
 Colour is not removed from the library: `encodePngPalette` and the per-cell /
 per-digit ink options stay, tested and ready, should a future model show a gain.
@@ -102,11 +104,59 @@ less ink in an 8x13 box than the purpose-built terminal bitmap — and lands neu
 the resolution result again from the other side: **the encoder reads pixels per glyph, not
 penmanship**. The shipped atlas is therefore unchanged.
 
-What is still untested is the other half of the idea: a **larger glyph** (e.g. a 10x16 atlas
-in a 10x18 cell). Per the resolution law that is the direction that should move accuracy,
-and its price is capacity — 640k px buys 4992 cells at 8x16 against 3555 at 10x18 (-29%),
-for +44% glyph pixels. `tools/make-atlas.py` and the `--show` glyph dump make that a
-one-afternoon experiment; the loader needs a width/height-aware atlas magic first.
+## A larger glyph box at the same geometry is neutral too
+
+The other half of the idea: keep the frame identical and give every character more
+pixels. Atlases now carry their own box (`FGATLAS1`), `tools/make-atlas.py --cell WxH`
+packs any of them, and the renderer centres whatever box the header declares.
+
+| atlas | box | ink / printable glyph | cells/frame at 640k px | capacity | screening |
+| --- | --- | --- | --- | --- | --- |
+| X.org 8x13 (shipped, in its 8x16 cell) | 8x13 | 15.8 | 4992 | — | 14/20 |
+| **X.org 8x16** | 8x16 | **24.6 (+56%)** | **4992** | **±0** | 17/20 |
+| X.org 9x15 | 9x15 | 18.7 (+18%) | 4633 | −7% | 10/20 |
+| X.org 10x20 | 10x20 | 37.1 (+135%) | 3162 | −37% | not run |
+
+This is not the `cellW 10 / cellH 20` row of the results table: that one widened the *cell*
+around the same 8x13 glyph, trading whitespace for glyphs per frame. This one grows the
+*glyph* inside the control's own cell, so nothing else moves.
+
+`glyph-8x16` is the clean treatment: the same `1024x624`, the same 39 rows, the same
+434-token bill, the same layout — the only change is that a glyph's box grows from 8x13 to
+8x16, and the 8x16 face is a heavier design that fills it (+56% ink per character).
+Screening put it three answers ahead, 17/20 against the control's 14/20.
+
+The paired 3-repeat confirmation (n=60 each, same run) came out **46/60 vs 46/60**, value
+accuracy 34/45 vs 35/45. The other numbers in that run say it better than the verdict
+does — the *same* variant, the same images, the same questions, asked three times:
+
+| variant | repeat 0 | repeat 1 | repeat 2 |
+| --- | --- | --- | --- |
+| control (X.org 8x13) | 14/20 | 15/20 | 17/20 |
+| `glyph-8x16` | 17/20 | 13/20 | 16/20 |
+
+That is the whole story of the last three experiments: a "+3" screening lead is the
+spread of one unchanged variant. The `glyph-9x15` screening result (−4) sits inside the
+same spread, in the other direction, so it is not evidence that a wider box hurts
+either.
+
+The resolution law therefore reads the same from above and from below:
+
+1. below ~5 px per glyph accuracy collapses (9/20 at half resolution);
+2. above it, extra pixels buy *capacity* — doubling the request budget doubled the rows
+   and left accuracy flat;
+3. and now: +56% ink per glyph at *identical* capacity buys nothing.
+
+`10x20` (+135% ink, −37% capacity) is the last point on that axis and not worth a run:
+it moves further into a plateau that has now been entered from both sides, and pays for
+the move with the capacity the plugin exists to buy.
+
+**No atlas ships; the glyph axis is closed.** Design at a fixed box is neutral, size at a
+fixed geometry is neutral, and the only lever that moves accuracy is staying above the
+legibility floor. The pipeline stays — `tools/make-atlas.py` (any box, any font FreeType
+can open, `--show` to eyeball glyphs before spending a call) and the
+`parseAsciiAtlas`/`setAsciiAtlas` seam — so the next font question is a bench run
+rather than a rewrite.
 
 ## The residual ceiling
 

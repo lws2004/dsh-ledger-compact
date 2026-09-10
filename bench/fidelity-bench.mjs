@@ -56,6 +56,8 @@ const REPEATS = Math.max(1, Number(flag("repeats", "1")) || 1);
 /** Request-image pixel budget to emulate. Must match the deployment's `imagePixelBudget`
  *  for the llm-deepseek model catalog entry, or the harness will resize the frame. */
 const BUDGET = Number(flag("budget", "640000")) || 640000;
+/** Write each variant's frame to bench/.cache/dump instead of asking the model. */
+const DUMP = argv.includes("--dump");
 
 function credential(ref) {
   const text = readFileSync(CREDENTIALS, "utf8");
@@ -187,13 +189,19 @@ function colored(cellW, cellH, palette, options = {}) {
   };
 }
 
-/** Swap the ASCII atlas for one rendered from a TTF (tools/make-atlas.py). */
-function atlasVariant(path) {
-  const atlas = parseAsciiAtlas(readFileSync(path));
+/**
+ * Swap the ASCII atlas (tools/make-atlas.py). The cell defaults to the atlas's own
+ * box; pass one explicitly to test a glyph box that does not fill the cell.
+ */
+function atlasVariant(file, cellW, cellH) {
+  const atlas = parseAsciiAtlas(readFileSync(join(here, "atlas", file)));
+  if (!atlas.w) throw new Error("unreadable atlas: " + file);
+  const w = cellW ?? atlas.w;
+  const h = cellH ?? atlas.h;
   return (text, lines) => {
     setAsciiAtlas(atlas);
     try {
-      return packed(8, 16, { gutterEvery: 1 })(text, lines);
+      return packed(w, h, { gutterEvery: 1 })(text, lines);
     } finally {
       setAsciiAtlas(null);
     }
@@ -242,9 +250,18 @@ const VARIANTS = {
   "budget-1.3m": { build: packed(8, 16, { gutterEvery: 1 }), legend: false, budget: 1300000 },
   "budget-2.1m": { build: packed(8, 16, { gutterEvery: 1 }), legend: false, budget: 2100000 },
   /** Same 8x13 cell, glyphs rendered from an outline font instead of X.org 8x13. */
-  "font-dejavu": { build: atlasVariant(join(here, "atlas", "dejavu-mono-11.bin")), legend: false },
-  "font-dejavu-bold": { build: atlasVariant(join(here, "atlas", "dejavu-mono-bold-11.bin")), legend: false },
-  "font-jetbrains": { build: atlasVariant(join(here, "atlas", "jetbrains-mono-11.bin")), legend: false },
+  "font-dejavu": { build: atlasVariant("dejavu-mono-11.bin", 8, 16), legend: false },
+  "font-dejavu-bold": { build: atlasVariant("dejavu-mono-bold-11.bin", 8, 16), legend: false },
+  "font-jetbrains": { build: atlasVariant("jetbrains-mono-11.bin", 8, 16), legend: false },
+  /**
+   * Larger glyph boxes. glyph-8x16 keeps the control's 8x16 cell — the only change
+   * is 24.6 ink pixels per printable glyph against 15.8 — so it is free in tokens,
+   * capacity and layout. glyph-8x16-lead buys a pixel of leading for 13% of the
+   * rows; glyph-9x15 is the wider box at -7% capacity.
+   */
+  "glyph-8x16": { build: atlasVariant("xorg-8x16.bin"), legend: false },
+  "glyph-8x16-lead": { build: atlasVariant("xorg-8x16.bin", 8, 18), legend: false },
+  "glyph-9x15": { build: atlasVariant("xorg-9x15.bin"), legend: false },
   /** Resolution isolation: identical content and layout, fewer pixels per glyph. */
   "res-50": { build: rescaled(0.5), legend: false },
   "res-50-up": { build: rescaled(0.5, true), legend: false },
@@ -383,6 +400,21 @@ for (const fixture of all) {
     activeBudget = spec.budget ?? BUDGET;
     const { framed, note, palette } = spec.build(text, fixture.lines);
     if (!framed || calls >= MAX_CALLS) continue;
+    if (DUMP) {
+      const dir = join(here, ".cache", "dump");
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      const png = palette ? encodePngPalette(framed.pixels, framed.w, framed.h, palette)
+        : encodePngGray(framed.pixels, framed.w, framed.h);
+      const file = join(dir, variant + "-" + fixture.name + ".png");
+      writeFileSync(file, png);
+      let dark = 0;
+      const paper = palette ? -1 : 128;
+      for (let i = 0; i < framed.pixels.length; i++) if (framed.pixels[i] < paper) dark += 1;
+      console.log(variant.padEnd(18) + fixture.name.padEnd(12) + framed.w + "x" + framed.h +
+        "  rows " + framed.rows + "  lines " + (framed.sourceLines ?? "-") +
+        "  ink " + (100 * dark / framed.pixels.length).toFixed(2) + "%  " + file);
+      continue;
+    }
     const preview = previewFor(framed.w, framed.h);
     const pixels = resizeGray(framed.pixels, framed.w, framed.h, preview.width, preview.height);
     // Guard: a frame that lost its ink (wrong palette, empty layout) would be measured
@@ -428,6 +460,9 @@ for (const fixture of all) {
 }
 
 writeFileSync(CACHE_PATH, JSON.stringify(cache, null, 1));
+// Raw rows for the run, so a later analysis can split by repeat, fixture or question
+// kind without re-asking (the console table only aggregates).
+writeFileSync(join(here, ".cache", "last-results.json"), JSON.stringify(results));
 
 const byVariant = new Map();
 for (const r of results) {

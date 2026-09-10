@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.11.0
+
+The other half of the font question was measured and answered: a **larger glyph box** does
+not move accuracy either. No atlas ships — but the format and the tooling did change.
+
+### Added
+
+- **Atlases carry their own glyph box.** The shipped atlas is now an `FGATLAS1` atlas:
+  width and height in the header, one bit row per pixel row, free of the old 8x13
+  assumption. `lib/fonts/README.md` documents the format.
+- **`tools/make-atlas.py` packs any box and reads any font FreeType can open** — TTF, OTF,
+  and X.org PCF, which is how the shipped 8x13 face is reproduced for the first time
+  (`--check-legacy` re-derives it glyph for glyph: 3385/3385 non-combining glyphs match;
+  `--upgrade` migrates an old atlas without re-rendering). `--cell WxH`, `--cps-from`,
+  `--show` to eyeball a glyph as ASCII art.
+- **The layout follows the atlas**: `resolveShape` grows the cell to hold the declared box
+  and re-derives the column count from the request pixel budget, so a swapped-in atlas can
+  neither bleed into the next cell nor overflow the budget.
+- **`bench/fidelity-bench.mjs --dump`** writes every variant's frame to `bench/.cache/dump`
+  with its ink coverage, so a font question can be *looked at* before it is asked.
+- `bench/atlas/xorg-8x16.bin`, `bench/atlas/xorg-9x15.bin` and three `glyph-*` variants.
+
+### Measured
+
+- **A larger glyph box at the same geometry is neutral.** `glyph-8x16` keeps the control's
+  `1024x624`, 39 rows and 434-token bill, and lifts ink per printable glyph from 15.8 to
+  24.6 (+56%). Screening: 17/20 against 14/20. Paired 3-repeat (n=60 each): **46/60 vs
+  46/60**, value accuracy 34/45 vs 35/45.
+- Re-asking the *same* variant three times scores **14, 15 and 17 out of 20** — the size of
+  the screening lead, and of every lead a screening has produced on this axis.
+- `9x15` (+18% ink, −7% capacity) screened 10/20, also inside that spread.
+
+### Changed
+
+- `lib/fonts/font8x13.bin` migrated to `FGATLAS1`. The glyphs are unchanged: the migration
+  was verified by re-rendering a reference frame byte for byte against the previous build,
+  and the regeneration is checked against the old file glyph for glyph.
+
 ## 0.10.0
 
 Fonts were tried. The shipped glyphs did not change, because measuring said not to.
