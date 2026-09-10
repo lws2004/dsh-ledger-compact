@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.7.0
+
+Priced against the model that actually reads the frames (deepseek-flash), and measured.
+
+### Added
+
+- **`lib/pricing.js`** — the published DeepSeek table (peak/off-peak cache-hit, cache-miss and output rates for `deepseek-flash` and `deepseek-v4-pro`), plus `requestPreviewSize`, which reproduces the request pipeline's resize onto the model's image pixel budget (640000 px).
+- **`bench/fidelity-bench.mjs`** — fixtures × layout variants × checkable questions against the live endpoint. It measures two things instead of assuming either: correctness from the picture, and the provider's own `usage.prompt_tokens` priced with the table. Every call is cached by content hash.
+- **Measured DeepSeek v4 image accounting** (`deepseekImageTokens`): `≈ clamp(70 + 5.7e-4·px, 213, 1043)` on the resized dimensions. The published "one image caps at 384 tokens" calculator does not match live usage.
+- `bench/report.md`, the raw result of a full matrix run.
+
+### Changed
+
+- **DeepSeek routes now draw inside the request pixel budget**: `8on16-budget 1024x624` (39 rows) instead of a 1024x2048 canvas that the pipeline resized to 566x1131. The resample, not the layout, was destroying legibility — the same content scored 1–2/10 answers when resized against 8/10 drawn natively, at the same ~430-token bill.
+- **Image token estimates for DeepSeek are taken on the preview size**, so a full frame estimates 434 instead of 1445. The excerpt notice reports the preview when (and only when) the pipeline will resize.
+- The layout bench now runs against `deepseek-flash` and reports money per frame next to the raw-text price.
+
 ## 0.6.0
 
 Dense-image layout: the PNG now fills the tile bands it pays for.

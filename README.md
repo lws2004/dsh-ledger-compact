@@ -108,7 +108,26 @@ The canvas is billed by area (512px tile bands — a full band and a blank one c
 - **Short lines pack into columns.** The planner tries 1–24 columns and keeps the highest occupancy; a candidate is dropped as soon as more than 2% of its cells would wrap, so one-line-per-cell holds whenever it can, and only content wider than the whole canvas wraps inside a cell. `seq 1 3000` becomes a 20-column numeric grid: 1860 source lines for the price of 93.
 - **Line ruler**: from 50 source lines up, the left gutter prints the source line number every 5 grid rows next to a faint rule. That makes the image addressable — a model that spots a bad row can `offset/limit` its way back to exact bytes instead of guessing.
 - **Layered ink**: body `16`, column rules `205`, ruler `150`, paper `245`. Hierarchy costs no tokens; it only costs pixels, and the pixels are already paid for.
-- The excerpt notice names the layout: `[Snapcompact: 3473 tokens → 1024x2046 PNG ~1445 tokens · 20 cols · line ruler]`, so the model never has to guess whether it is reading one column or twenty.
+- The excerpt notice names the layout: `[Snapcompact: 3480 tokens → 1024x624 PNG ~434 tokens · 20 cols · line ruler]`, so the model never has to guess whether it is reading one column or twenty.
+
+### Cost and fidelity (deepseek-flash)
+
+A dense image is billed as **input tokens**, at the published DeepSeek rates (api-docs.deepseek.com, read 2026-09-10):
+
+| | peak | off-peak |
+| --- | --- | --- |
+| input, cache hit /1M | $0.006 | $0.003 |
+| input, cache miss /1M | $0.30 | $0.15 |
+| output /1M | $1.20 | $0.60 |
+
+Two things below are measured, not assumed:
+
+- **Draw inside the request pixel budget.** The request pipeline resizes any frame above `640000` px before dispatch, and the provider both bills and reads the resized image. Measured on identical content: drawing `1024x2046` (sent as `566x1131`) answered 1–2 of 10 questions; drawing `1024x624` (no resize) answered 8. DeepSeek routes therefore use the `8on16-budget 1024x624` geometry (39 rows).
+- **The image-token curve is measured too**: `≈ clamp(70 + 5.7e-4·px, 213, 1043)` on the resized dimensions. The published "one image caps at 384 tokens" calculator does not match live `usage`; this fit is within ~3% (est 434 vs measured 446, the gap being the prompt text).
+- A full frame costs about **$0.00013**; the same content as raw text costs $0.001–$0.014 — **10–100x more**.
+- Fidelity has a ceiling: even unresized, roughly 20% of **exact values** (coordinates, IPs, status codes) are misread. Exact bytes therefore stay in the text excerpt and the re-readable source; the image carries bulk and structure. That is exactly why the `re-read with offset/limit` contract exists.
+
+`bench/report.md` holds the raw run (fixtures × layout variants × checkable questions, answers and `usage` cached).
 
 ## Fold card
 
@@ -153,6 +172,9 @@ node --test lib/ledger.test.js
 # per-fixture layout economics: text vs image tokens, lines carried, canvas occupancy.
 # Pure arithmetic, no model calls.
 node bench/layout-bench.mjs
+
+# fidelity + real billing: fixtures x layout variants x checkable questions, cached in bench/.cache
+node bench/fidelity-bench.mjs
 
 # one test binds a real dsh-session; point it at the installed package to run it
 DSH_SESSION_MODULE="$DSH/node_modules/@deepseek-ai/dsh-session/lib/index.js" \
