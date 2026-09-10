@@ -187,6 +187,37 @@ function colored(cellW, cellH, palette, options = {}) {
   };
 }
 
+/** Post-process a rendered frame: same content, different effective resolution. */
+function rescaled(factor, upscaleBack = false) {
+  return (text, lines) => {
+    const base = packed(8, 16, { gutterEvery: 1 })(text, lines);
+    const w = Math.max(1, Math.round(base.framed.w * factor));
+    const h = Math.max(1, Math.round(base.framed.h * factor));
+    let pixels = resizeGray(base.framed.pixels, base.framed.w, base.framed.h, w, h);
+    let outW = w;
+    let outH = h;
+    if (upscaleBack) {
+      pixels = resizeGray(pixels, w, h, base.framed.w, base.framed.h);
+      outW = base.framed.w;
+      outH = base.framed.h;
+    }
+    return { framed: { ...base.framed, pixels, w: outW, h: outH }, shape: base.shape, note: base.note + " · x" + factor };
+  };
+}
+
+/** Same rows, same glyph size, but a canvas big enough to trip the provider's projection. */
+function padded(frameW, frameH) {
+  return (text, lines) => {
+    const base = packed(8, 16, { gutterEvery: 1 })(text, lines);
+    if (base.framed.w > frameW || base.framed.h > frameH) return base;
+    const pixels = new Uint8Array(frameW * frameH).fill(245);
+    for (let y = 0; y < base.framed.h; y++) {
+      pixels.set(base.framed.pixels.subarray(y * base.framed.w, (y + 1) * base.framed.w), y * frameW);
+    }
+    return { framed: { ...base.framed, pixels, w: frameW, h: frameH }, shape: base.shape, note: base.note + " · padded" };
+  };
+}
+
 /** Each variant turns one axis: geometry, layout, prompt legend, ink colour, or budget. */
 const VARIANTS = {
   ruler1: { build: packed(8, 16, { gutterEvery: 1 }), legend: false },
@@ -196,7 +227,12 @@ const VARIANTS = {
   "color-alert": { build: colored(8, 16, PALETTES.alert, { digits: true, alerts: true }), legend: false },
   /** The same renderer at a larger request-image budget (set --budget to match). */
   "budget-1.3m": { build: packed(8, 16, { gutterEvery: 1 }), legend: false, budget: 1300000 },
-  "budget-2.1m": { build: packed(8, 16, { gutterEvery: 1 }), legend: false, budget: 2100000 }
+  "budget-2.1m": { build: packed(8, 16, { gutterEvery: 1 }), legend: false, budget: 2100000 },
+  /** Resolution isolation: identical content and layout, fewer pixels per glyph. */
+  "res-50": { build: rescaled(0.5), legend: false },
+  "res-50-up": { build: rescaled(0.5, true), legend: false },
+  /** Canvas isolation: identical rows at identical glyph size, mostly empty paper. */
+  "tall-blank": { build: padded(1024, 2048), legend: false }
 };
 
 // ---------------------------------------------------------------- request pipeline emulation

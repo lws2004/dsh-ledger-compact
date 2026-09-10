@@ -57,6 +57,32 @@ The setting still earns its place, because the failure is asymmetric: if a deplo
 `imagePixelBudget` to `"low"` (262144 px) while the plugin draws for 640000, the harness
 resizes every frame — the exact failure mode measured at 1–2/10.
 
+## What moves accuracy is resolution, not canvas size
+
+Isolation run (n=20 each): same fixtures, same questions, same layout, same 8x16 cells.
+
+| variant | what differs | actually sent | token bill | correct | value |
+| --- | --- | --- | --- | --- | --- |
+| control | — | 1024x624 | 434 | 14/20 | 67% |
+| `res-50` | same content, half the linear resolution | 512x312 | 213 | 9/20 | 47% |
+| `res-50-up` | downscaled 0.5 then upscaled back — **identical sent size and identical bill to the control** | 1024x624 | 434 | 12/20 | 60% |
+| `tall-blank` | the same 39 rows at the same glyph size, on a 2048px canvas | 566x1131 (resized by the pipeline) | 435 | 4/20 | 13% |
+
+`res-50-up` is the decisive row: the provider receives exactly the same dimensions and the
+same token bill as the control, but the information was destroyed before the upscale, and
+accuracy still drops 14 → 12. **The model reads effective pixels per glyph; image size and
+token count are proxies for it, not the cause.**
+
+That yields the three regimes the layout has to respect:
+
+1. **Below the legibility threshold** (~5 px per glyph after every resize), accuracy
+   collapses — 47% at half resolution, 13% when a padded canvas is projected back down.
+2. **Above it**, extra pixels buy *capacity*, not accuracy: raising the request budget from
+   640k to 1.3M px doubled the rows per frame and left accuracy flat.
+3. **A residual floor** — roughly a quarter of exact-value questions — that resolution does
+   not touch: wrong-row selection and dropped digits, the class the per-row ruler improved
+   from 73% to 87%.
+
 ## The residual ceiling
 
 Even in the shipped configuration roughly **a quarter of exact-value questions are

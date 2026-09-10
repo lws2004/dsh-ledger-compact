@@ -20,6 +20,14 @@ measuring rather than a constant to hard-code.
 - The setting still matters in the other direction: a deployment on `"low"` (262144 px)
   would have every 640k frame resized — the failure mode measured at 1–2/10.
 
+### Clarified
+
+- **Resolution, not canvas size, is what the accuracy hangs on.** Isolating it: identical
+  content at half the linear resolution scored 9/20 against the control's 14/20; downscaled
+  0.5 and upscaled back to the *same dimensions and the same token bill* still scored 12/20;
+  the same rows on a 2048px canvas (which the pipeline then resized) scored 4/20. Extra
+  pixels above the legibility threshold buy capacity, not accuracy.
+
 ### Changed
 
 - The budget travels with the shape, so `resolveShape`, `estImageTokens`, `previewSize`
