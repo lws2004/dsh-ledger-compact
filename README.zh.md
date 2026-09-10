@@ -16,7 +16,7 @@
 
 本插件先做两件更便宜的事，第三件可选：
 
-1. **入境定形** — 空闲步进时，把**尚未发送**的超大工具结果冻成头尾摘录。已经进过前缀的旧消息不回头改。
+1. **入境定形** — 空闲步进时，把**尚未发送**的超大工具结果冻成头尾摘录。只看刚结束的那一步：它的第一次请求正是眼下要发的这一次，所以重写永远不会让已缓存的前缀失效。
 2. **机械折页** — `/fast-compact` 和输入栏闪电把较旧历史折成一张短账卡，不调模型。
 3. **替换默认压缩**（默认关） — 挂在官方引擎的 `summarize` 钩子上，让 `/compact`、自动压缩、溢出恢复也不再调模型。
 
@@ -24,7 +24,7 @@
 
 ## 安装
 
-需要 **dsh ≥ 0.1.2-rc.1**。
+需要 **dsh ≥ 0.1.2-rc.1**；已在 **0.1.5-rc.1** 上验证。这一区间的两次 API 改名都已兼容：`session.events` → `session.eventAt(seq)`，以及定位替换键 `start/end` → `startSeq/endSeq`。
 
 ```bash
 dsh plugin --profile web add github:telagod/dsh-ledger-compact
@@ -78,9 +78,11 @@ dsh plugin --profile web add ./dsh-ledger-compact
 
 `/compact` 仍是官方命令。替换默认压缩**关**时照旧调模型；**开**时同一条命令经现有引擎走机械折页。
 
+`/fast-compact status` 还会报健康状态：入境定形的 shaped/snapped/节省计数、持续失败时的最后一条错误，以及缺少 `summarize` 钩子的压缩引擎（开着替换默认压缩时，那种引擎会静默改调模型）。
+
 ## 入境摘录
 
-默认只出文本：不打图、不调模型。已经是占位符的结果不会再改。`skill`、`context` 工具结果会跳过。没有 `tokenMeter` 时整段入境跳过，避免只 `replace` 却写不出 `compaction/prune`。
+默认只出文本：不打图、不调模型。候选只有**当前回合紧邻上一步**的结果；其余已经发送过的节点保持逐字节不变——这正是前缀缓存不被破坏的原因。已经是占位符的结果不会再改。`skill`、`context` 工具结果会跳过。没有 `tokenMeter` 时整段入境跳过，避免只 `replace` 却写不出 `compaction/prune`。
 
 ```
 [Snapcompact: N tokens → excerpt]
@@ -97,7 +99,7 @@ dsh plugin --profile web add ./dsh-ledger-compact
 
 ## 折页卡
 
-纯机械，不调模型。旧的折页占位和 `<compacted-summary>` 会被丢掉，不会套娃。
+纯机械，不调模型。旧折页文本不会被套娃，但也不会丢：从上一张 `[Snapcompact]` 卡里解析出的文件、意图和错误会延续到新卡（文件只占用新跨度没用完的额度）。
 
 ```
 [Snapcompact] Fold ~N tok. Exact file bytes are not stored — re-read with offset/limit if a detail matters.
@@ -134,11 +136,16 @@ Web 上 compaction 在 preset isolate 里。Host 侧用 `agentPresets.serviceFor
 
 ```bash
 node --test lib/ledger.test.js
+
+# 有一个用例绑定真实 dsh-session，指向已安装包才会运行
+DSH_SESSION_MODULE="$DSH/node_modules/@deepseek-ai/dsh-session/lib/index.js" \
+  node --test lib/ledger.test.js
 ```
 
 | 文件 | 职责 |
 | --- | --- |
-| `lib/ingress.js` | 当前回合 `tool_result` 定形 |
+| `lib/ctx.js` | 可选服务查找 + 跨版本 session 事件读取 |
+| `lib/ingress.js` | 上一步 `tool_result` 定形（结构上缓存安全） |
 | `lib/vision.js` | 密图：`inputModalities` + 设置双门 |
 | `lib/excerpt.js` / `lib/fold.js` / `lib/snapfont.js` | 摘录、折页卡、点阵 |
 | `lib/hook.js` | 机械 `summarize` 钩子 |

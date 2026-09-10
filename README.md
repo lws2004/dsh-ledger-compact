@@ -16,7 +16,7 @@ Long agent turns dump huge `tool_result` blocks into the next request. DSH alrea
 
 This plugin does two cheaper things first, and optionally a third:
 
-1. **Ingress shaping** — freeze oversized *unsent* tool results into a head/tail excerpt on the idle pre-step. History that already entered the prefix is left alone.
+1. **Ingress shaping** — freeze oversized *unsent* tool results into a head/tail excerpt on the idle pre-step. Only the step that just finished is touched: its first request is the one being prepared, so a rewrite never invalidates a provider-cached prefix.
 2. **Mechanical fold** — `/fast-compact` and the input-bar bolt collapse older history into a short ledger card. No model call.
 3. **Replace default compact** *(off)* — reuse the official engine’s `summarize` hook so `/compact`, auto-compaction, and overflow recovery also skip the LLM.
 
@@ -24,7 +24,7 @@ Keep `dsh-compaction-basic` mounted. This plugin does not replace the engine.
 
 ## Install
 
-Requires **dsh ≥ 0.1.2-rc.1**.
+Requires **dsh ≥ 0.1.2-rc.1**; verified on **0.1.5-rc.1**. Both API renames in that range are handled: `session.events` → `session.eventAt(seq)` and the positional replace keys `start/end` → `startSeq/endSeq`.
 
 ```bash
 dsh plugin --profile web add github:telagod/dsh-ledger-compact
@@ -76,9 +76,11 @@ There is no vision sidecar. `/fast-compact vision …` was removed.
 
 `/compact` remains the official DSH command. With replace-default **off**, it still calls the model. With it **on**, the same command runs the mechanical fold through the existing engine.
 
+`/fast-compact status` also reports health: ingress shaped/snapped/saved counters, the last ingress error when one is repeating, and any compaction engine that lacks a `summarize` hook (with replace-default on, such an engine would silently call the model).
+
 ## Ingress excerpt
 
-Default is text only — no PNG, no LLM. Already-shaped placeholders are not rewritten. `skill` and `context` tool results are skipped. If `tokenMeter` is missing, ingress is skipped so the plugin never `replace`s without writing `compaction/prune`.
+Default is text only — no PNG, no LLM. Only results from the **immediately preceding step** of the current turn are candidates; everything already sent stays byte-identical, which is what keeps the provider prefix cache intact. Already-shaped placeholders are not rewritten. `skill` and `context` tool results are skipped. If `tokenMeter` is missing, ingress is skipped so the plugin never `replace`s without writing `compaction/prune`.
 
 ```
 [Snapcompact: N tokens → excerpt]
@@ -95,7 +97,7 @@ A PNG is attached only when all of these hold:
 
 ## Fold card
 
-Mechanical, no model. Prior fold placeholders and `<compacted-summary>` blocks are dropped, not nested.
+Mechanical, no model. Prior fold text is never nested, but it is not lost either: files, intents and errors recovered from an earlier `[Snapcompact]` card are carried forward into the new one (files only fill capacity the new span left over).
 
 ```
 [Snapcompact] Fold ~N tok. Exact file bytes are not stored — re-read with offset/limit if a detail matters.
@@ -132,11 +134,16 @@ On web, compaction lives in the preset isolate. Host code reads it with `agentPr
 
 ```bash
 node --test lib/ledger.test.js
+
+# one test binds a real dsh-session; point it at the installed package to run it
+DSH_SESSION_MODULE="$DSH/node_modules/@deepseek-ai/dsh-session/lib/index.js" \
+  node --test lib/ledger.test.js
 ```
 
 | File | Role |
 | --- | --- |
-| `lib/ingress.js` | Current-turn `tool_result` shaping |
+| `lib/ctx.js` | Optional service lookup + version-tolerant session event access |
+| `lib/ingress.js` | Previous-step `tool_result` shaping (cache-safe by construction) |
 | `lib/vision.js` | Dense PNG gated by `inputModalities` + settings |
 | `lib/excerpt.js` / `lib/fold.js` / `lib/snapfont.js` | Excerpt, fold card, bitmap |
 | `lib/hook.js` | Mechanical `summarize` hook |
