@@ -1,6 +1,6 @@
 {
   "name": "dsh-ledger-compact",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "dsh-plugin: OMP-style ingress shaping plus optional local /fast-compact. Can replace DSH /compact and auto-compaction with a mechanical fold.",
   "license": "MIT",
   "author": "telagod",

@@ -26,7 +26,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { planGrid } from "../lib/layout.js";
-import { estImageTokens, maxRows, previewSize, raster, rasterGrid, resolveShape } from "../lib/snapfont.js";
+import { deepseekImageTokens, maxRows, previewSize, raster, rasterGrid, resolveShape } from "../lib/snapfont.js";
 import { encodePngGray, encodePngPalette } from "../lib/png.js";
 import { formatUsd, priceFor, requestPreviewSize, usdFor } from "../lib/pricing.js";
 import { estTokensUtf8 } from "../lib/tokens.js";
@@ -53,6 +53,9 @@ const WIRE = flag("wire", "jpeg");
 /** Repeats per question. The endpoint is stochastic, so one sample per question cannot
  *  resolve effects below ~15%; repeats buy the power to tell a real gain from noise. */
 const REPEATS = Math.max(1, Number(flag("repeats", "1")) || 1);
+/** Request-image pixel budget to emulate. Must match the deployment's `imagePixelBudget`
+ *  for the llm-deepseek model catalog entry, or the harness will resize the frame. */
+const BUDGET = Number(flag("budget", "640000")) || 640000;
 
 function credential(ref) {
   const text = readFileSync(CREDENTIALS, "utf8");
@@ -132,9 +135,12 @@ function layoutNote(plan, framed) {
   return (framed.columns > 1 ? " · " + framed.columns + " cols" : "") + (framed.gutterCols > 0 ? " · line ruler" : "");
 }
 
+/** Budget in force for the variant currently being rendered. */
+let activeBudget = BUDGET;
+
 /** The frame the request pipeline will not have to resize. */
 function budgetShape(cellW, cellH) {
-  const budget = priceFor(MODEL)?.requestPixelBudget ?? 640000;
+  const budget = activeBudget;
   const cols = Math.max(8, Math.floor(Math.min(BASE.frameW, 1024) / cellW));
   const frameW = cols * cellW;
   const frameH = Math.floor(Math.floor(budget / frameW) / cellH) * cellH;
@@ -181,13 +187,16 @@ function colored(cellW, cellH, palette, options = {}) {
   };
 }
 
-/** Each variant turns one axis: geometry, layout, prompt legend, or ink colour. */
+/** Each variant turns one axis: geometry, layout, prompt legend, ink colour, or budget. */
 const VARIANTS = {
   ruler1: { build: packed(8, 16, { gutterEvery: 1 }), legend: false },
   "color-rule": { build: colored(8, 16, PALETTES.rule, {}), legend: false },
   "color-digit": { build: colored(8, 16, PALETTES.digit, { digits: true }), legend: false },
   "color-both": { build: colored(8, 16, PALETTES.both, { digits: true }), legend: false },
-  "color-alert": { build: colored(8, 16, PALETTES.alert, { digits: true, alerts: true }), legend: false }
+  "color-alert": { build: colored(8, 16, PALETTES.alert, { digits: true, alerts: true }), legend: false },
+  /** The same renderer at a larger request-image budget (set --budget to match). */
+  "budget-1.3m": { build: packed(8, 16, { gutterEvery: 1 }), legend: false, budget: 1300000 },
+  "budget-2.1m": { build: packed(8, 16, { gutterEvery: 1 }), legend: false, budget: 2100000 }
 };
 
 // ---------------------------------------------------------------- request pipeline emulation
@@ -215,6 +224,16 @@ function resizeGray(pixels, w, h, nw, nh) {
 }
 
 // ---------------------------------------------------------------- wire
+
+/** Same projection the adapter applies, at the budget under test. */
+function previewFor(w, h) {
+  const px = w * h;
+  if (px <= activeBudget) return { width: w, height: h, resized: false, scale: 1 };
+  const scale = Math.sqrt(activeBudget / px);
+  const width = Math.max(1, Math.round(w * scale));
+  const height = Math.max(1, Math.round(h * scale));
+  return { width, height, resized: true, scale };
+}
 
 const WIRE_DIR = join(here, ".cache", "wire");
 
@@ -308,9 +327,10 @@ for (const fixture of all) {
   const textTok = estTokensUtf8(text);
   for (const variant of variants) {
     const spec = VARIANTS[variant];
+    activeBudget = spec.budget ?? BUDGET;
     const { framed, note, palette } = spec.build(text, fixture.lines);
     if (!framed || calls >= MAX_CALLS) continue;
-    const preview = requestPreviewSize(framed.w, framed.h, MODEL);
+    const preview = previewFor(framed.w, framed.h);
     const pixels = resizeGray(framed.pixels, framed.w, framed.h, preview.width, preview.height);
     // Guard: a frame that lost its ink (wrong palette, empty layout) would be measured
     // as a fidelity failure instead of as the bug it is.
@@ -322,7 +342,8 @@ for (const fixture of all) {
       : encodePngGray(pixels, preview.width, preview.height);
     const wire = toWire(png, createHash("sha256").update(png).digest("hex").slice(0, 16));
     const dataUri = "data:" + wire.mediaType + ";base64," + Buffer.from(wire.data).toString("base64");
-    const estTok = estImageTokens(framed.w, framed.h, family);
+    // Price what will actually be sent, at the budget under test.
+    const estTok = deepseekImageTokens(preview.width, preview.height);
     const notice = "[Snapcompact: " + textTok + " tokens → " + framed.w + "x" + framed.h + " PNG" +
       (preview.resized ? " (preview " + preview.width + "x" + preview.height + ")" : "") +
       " ~" + estTok + " tokens" + note + "]";

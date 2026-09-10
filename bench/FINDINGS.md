@@ -34,6 +34,29 @@ is cached; results live in `bench/report.md`, raw usage included.
 Colour is not removed from the library: `encodePngPalette` and the per-cell /
 per-digit ink options stay, tested and ready, should a future model show a gain.
 
+## The request-image budget is a knob, and the default is the sweet spot
+
+`llm-deepseek` exposes `imagePixelBudget` per catalog model (640000 px by default; `"low"`
+means 512x512; the old `imageDetail` is gone). The plugin cannot read it at runtime —
+`resolveModelInfo` returns input modalities only — so the canvas is planned from a setting
+that must match the deployment.
+
+Raising it was measured, not assumed (n=20 per budget, same layout, same questions):
+
+| budget | canvas | rows/frame | correct | value acc | est tok | $/correct |
+| --- | --- | --- | --- | --- | --- | --- |
+| **640000 (default)** | 1024x624 | 39 (761 packed) | 14/20 | 67% | 434 | **$0.000191** |
+| 1300000 | 1024x1264 | 79 (1561 packed) | 14/20 | 73% | 808 | $0.000370 |
+| 2100000 | 1024x2048 | 127 (2541 packed) | 6/20 | 33% | 1043 | $0.001070 |
+
+Twice the budget buys the same accuracy for twice the money, and 2.1M collapses: the
+provider projects a large frame onto its own vision grid, so the extra rows are drawn into
+resolution nobody reads. **Keep 640000.**
+
+The setting still earns its place, because the failure is asymmetric: if a deployment sets
+`imagePixelBudget` to `"low"` (262144 px) while the plugin draws for 640000, the harness
+resizes every frame — the exact failure mode measured at 1–2/10.
+
 ## The residual ceiling
 
 Even in the shipped configuration roughly **a quarter of exact-value questions are

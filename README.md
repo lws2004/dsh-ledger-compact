@@ -133,7 +133,7 @@ Two things below are measured, not assumed:
 - **Packing** carries ~20x more lines per frame at equal accuracy.
 - **A source line number on every row** lifted exact-value accuracy from 73% to 87% at no token or capacity cost — it aims straight at the dominant error class, reading the wrong line.
 - **Colour was tried and rejected**: four palettes, paired 3-repeat run over 60 samples each — grayscale 46/60, colour 44/60, value accuracy identical. The encoder (`encodePngPalette`) and per-cell/per-digit ink stay in the library, off by default.
-- **Prompt legend, roomier cells, single column as default**: measured, none earned its cost.
+- **Do not raise the request-image budget**: `llm-deepseek`'s `imagePixelBudget` (640000 by default) is configurable, but 1.3M measured the same accuracy at twice the money and 2.1M collapsed to 33%. The plugin's 传图像素预算 setting only needs to follow the deployment's value — and must, if it is set to `"low"`, or every frame gets resized into the 1–2/10 failure mode.
 - **Ceiling**: about a quarter of exact-value questions are still misread in the best configuration. The image is an index, not a notary — exact bytes travel as text, in the fold card, or through `offset/limit` re-reads.
 
 ## Fold card

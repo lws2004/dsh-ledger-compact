@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.9.0
+
+The request-image budget became a setting, because it turned out to be a knob worth
+measuring rather than a constant to hard-code.
+
+### Added
+
+- **`imagePixelBudget` setting** (200000–4000000, default 640000) plus its control in the
+  入境 tab. The canvas is planned to fit it, so it has to match `llm-deepseek`'s per-model
+  `imagePixelBudget`; the plugin cannot read that value at runtime (`resolveModelInfo`
+  returns input modalities only).
+
+### Measured
+
+- **Raising the budget does not pay.** 1.3M px answered 14/20 for twice the money of
+  640k's 14/20; 2.1M px collapsed to 6/20 as the provider projected the frame onto its own
+  vision grid. Keep the default.
+- The setting still matters in the other direction: a deployment on `"low"` (262144 px)
+  would have every 640k frame resized — the failure mode measured at 1–2/10.
+
+### Changed
+
+- The budget travels with the shape, so `resolveShape`, `estImageTokens`, `previewSize`
+  and `maxRows` all agree on the same number: canvas, estimate, economy gate and notice
+  can no longer disagree about what the provider will receive.
+
 ## 0.8.0
 
 An exploration loop around the layout, and the measured answer to "can we do better?".
