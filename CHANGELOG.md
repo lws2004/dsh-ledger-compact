@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.0
+
+### Added
+
+- **Tabbed settings page** (入境 / 折页 / 诊断) with per-row icons, a denser 12.5 px layout, and a live fold-card preview in the 折页 tab.
+- **诊断 tab backed by a new `getHealth()` host RPC**: plugin version, the session-event accessor this DSH actually exposes (`eventAt` or the legacy `events`), ingress counters (shaped / snapped / saved / failures plus the last error), and compaction-engine hook wiring.
+- `VERSION` in `lib/config.js`, guarded by a test that compares it with `package.json`.
+
+### Changed
+
+- `settingsSchema.toJSON()` now emits the **canonical Schemastery `{uid, refs}` envelope** instead of a flat `{type, meta, dict}` document. Nested nodes keep their methods (`simplify`, …) after rehydration; a test compares the envelope field-by-field against a reference schema built with the real library when one is resolvable.
+- The health snapshot records the session-event accessor observed at runtime, so a DSH upgrade that renames it again shows up in the UI instead of failing silently.
+
 ## 0.4.0
 
 Compatibility and hardening release. Verified against the DSH 0.1.5-rc.1 API and the 0.1.1-rc.2 shapes it replaced.

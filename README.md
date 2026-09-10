@@ -52,7 +52,11 @@ The input-bar **bolt** is a context-pressure meter. By default it needs a second
 
 ## Settings
 
-Open **Settings → 快速压缩**. Changes write through to the Host document immediately.
+Open **Settings → 快速压缩**. Changes write through to the Host document immediately. The page is tabbed:
+
+- **入境** — the four shaping settings below.
+- **折页** — fold confirmation, replace-default, and a live preview of the fold card.
+- **诊断** — plugin version, the session-event accessor this DSH exposes, ingress counters and the last failure, and how many compaction engines are hooked (plus any engine that would silently fall back to a model call).
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
@@ -137,12 +141,14 @@ node --test lib/ledger.test.js
 
 # one test binds a real dsh-session; point it at the installed package to run it
 DSH_SESSION_MODULE="$DSH/node_modules/@deepseek-ai/dsh-session/lib/index.js" \
+DSH_SCHEMASTER_MODULE="$DSH/node_modules/@deepseek-ai/schemastery/lib/index.mjs" \
   node --test lib/ledger.test.js
 ```
 
 | File | Role |
 | --- | --- |
 | `lib/ctx.js` | Optional service lookup + version-tolerant session event access |
+| `lib/schema-envelope.js` | Canonical Schemastery `{uid, refs}` settings envelope |
 | `lib/ingress.js` | Previous-step `tool_result` shaping (cache-safe by construction) |
 | `lib/vision.js` | Dense PNG gated by `inputModalities` + settings |
 | `lib/excerpt.js` / `lib/fold.js` / `lib/snapfont.js` | Excerpt, fold card, bitmap |

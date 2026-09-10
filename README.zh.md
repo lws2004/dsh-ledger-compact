@@ -52,7 +52,11 @@ dsh plugin --profile web add ./dsh-ledger-compact
 
 ## 设置
 
-打开 **设置 → 快速压缩**。改动即时写入 Host 文档。
+打开 **设置 → 快速压缩**。改动即时写入 Host 文档。页面分三个 tab：
+
+- **入境** —— 下面四项定形设置。
+- **折页** —— 折页二次确认、替换默认压缩，以及一张折页卡的实时预览。
+- **诊断** —— 插件版本、这台 DSH 实际暴露的会话事件读取方式、入境计数与最近失败、压缩引擎钩住数量（以及哪些引擎会静默退回模型调用）。
 
 | 设置 | 默认 | 含义 |
 | --- | --- | --- |
@@ -139,12 +143,14 @@ node --test lib/ledger.test.js
 
 # 有一个用例绑定真实 dsh-session，指向已安装包才会运行
 DSH_SESSION_MODULE="$DSH/node_modules/@deepseek-ai/dsh-session/lib/index.js" \
+DSH_SCHEMASTER_MODULE="$DSH/node_modules/@deepseek-ai/schemastery/lib/index.mjs" \
   node --test lib/ledger.test.js
 ```
 
 | 文件 | 职责 |
 | --- | --- |
 | `lib/ctx.js` | 可选服务查找 + 跨版本 session 事件读取 |
+| `lib/schema-envelope.js` | 规范 Schemastery `{uid, refs}` 设置信封 |
 | `lib/ingress.js` | 上一步 `tool_result` 定形（结构上缓存安全） |
 | `lib/vision.js` | 密图：`inputModalities` + 设置双门 |
 | `lib/excerpt.js` / `lib/fold.js` / `lib/snapfont.js` | 摘录、折页卡、点阵 |
