@@ -98,6 +98,17 @@ A PNG is attached only when all of these hold:
 - “Allow dense PNG” is on
 - the routed model’s `inputModalities` **explicitly includes `image`** (names like `gpt-4o` are never guessed)
 - excerpt + estimated image tokens ≤ original × savings ratio (default 15% cheaper)
+- the text actually drawn into the image must be **more expensive as text** than the image itself (default: image ≤ text × 0.85). Three thousand lines of three characters each lose money as a PNG, so only the excerpt ships
+
+### Dense-image layout
+
+The canvas is billed by area (512px tile bands — a full band and a blank one cost the same), so the layout has exactly one job: **fill the canvas that has already been paid for**.
+
+- **The canvas cap is tile-aligned**: openai-family frames are `1024×2048`, not `1024×1540`. Same 1445 tokens, 93 text rows instead of 70 (+33%) — the old height crossed into a paid band for four pixels.
+- **Short lines pack into columns.** The planner tries 1–24 columns and keeps the highest occupancy; a candidate is dropped as soon as more than 2% of its cells would wrap, so one-line-per-cell holds whenever it can, and only content wider than the whole canvas wraps inside a cell. `seq 1 3000` becomes a 20-column numeric grid: 1860 source lines for the price of 93.
+- **Line ruler**: from 50 source lines up, the left gutter prints the source line number every 5 grid rows next to a faint rule. That makes the image addressable — a model that spots a bad row can `offset/limit` its way back to exact bytes instead of guessing.
+- **Layered ink**: body `16`, column rules `205`, ruler `150`, paper `245`. Hierarchy costs no tokens; it only costs pixels, and the pixels are already paid for.
+- The excerpt notice names the layout: `[Snapcompact: 3473 tokens → 1024x2046 PNG ~1445 tokens · 20 cols · line ruler]`, so the model never has to guess whether it is reading one column or twenty.
 
 ## Fold card
 
@@ -139,6 +150,10 @@ On web, compaction lives in the preset isolate. Host code reads it with `agentPr
 ```bash
 node --test lib/ledger.test.js
 
+# per-fixture layout economics: text vs image tokens, lines carried, canvas occupancy.
+# Pure arithmetic, no model calls.
+node bench/layout-bench.mjs
+
 # one test binds a real dsh-session; point it at the installed package to run it
 DSH_SESSION_MODULE="$DSH/node_modules/@deepseek-ai/dsh-session/lib/index.js" \
 DSH_SCHEMASTER_MODULE="$DSH/node_modules/@deepseek-ai/schemastery/lib/index.mjs" \
@@ -151,7 +166,8 @@ DSH_SCHEMASTER_MODULE="$DSH/node_modules/@deepseek-ai/schemastery/lib/index.mjs"
 | `lib/schema-envelope.js` | Canonical Schemastery `{uid, refs}` settings envelope |
 | `lib/ingress.js` | Previous-step `tool_result` shaping (cache-safe by construction) |
 | `lib/vision.js` | Dense PNG gated by `inputModalities` + settings |
-| `lib/excerpt.js` / `lib/fold.js` / `lib/snapfont.js` | Excerpt, fold card, bitmap |
+| `lib/excerpt.js` / `lib/fold.js` / `lib/snapfont.js` | Excerpt, fold card, bitmap and grid raster |
+| `lib/layout.js` | Dense-image layout: column packing, in-cell wrap, line ruler, occupancy |
 | `lib/hook.js` | Mechanical `summarize` hook |
 | `lib/resolve.js` | Find isolated compaction engines |
 | `lib/index.js` | Command, settings, pre-step |

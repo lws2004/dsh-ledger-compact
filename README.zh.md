@@ -100,6 +100,17 @@ dsh plugin --profile web add ./dsh-ledger-compact
 - 勾了「允许密图」
 - 当前路由模型的 `inputModalities` **明确包含 `image`**（绝不按 `gpt-4o` 这类名字猜）
 - 摘录 + 估图 token ≤ 原文 × 节省比例（默认至少省 15%）
+- 图中真正画进去的文本，按文本计价必须**比这张图更贵**（默认 图 ≤ 文本 × 0.85）。一行三个字符、三千行的输出，贴图反而亏，这时只出摘录
+
+### 密图排版
+
+画布按面积计价（512px tile 带，画满和画空一个价），所以排版只干一件事：**把有信息的格子塞满已经付过钱的画布**。
+
+- **画布对齐 tile 边界**：openai 系画布是 `1024×2048` 而不是 `1024×1540`。同样的 1445 token，正文从 70 行变 93 行（+33%）——旧高度里有 4 个像素跨进了下一条付费带。
+- **短行自动分栏**：按行长分布试 1–24 栏，取占用率最高者；候选只要换行率超过 2% 就淘汰，所以「一行一格」的承诺在能守住时一定守住，只有整行宽过画布的内容才在格内折行。`seq 1 3000` 会排成 20 栏数字阵，同价从 93 行变 1860 行。
+- **行号尺**：源行数 ≥ 50 时左侧留 gutter，每 5 个网格行标一次**源行号**，并画一条淡竖线。图因此是可寻址的：模型看到异常行，可以直接 `offset/limit` 回读精确字节，而不是只能猜。
+- **灰阶层级**：正文 `16`、栏线 `205`、行号 `150`、纸面 `245`。层级不花 token，花的是已经付过钱的像素。
+- 摘录提示会写明版面：`[Snapcompact: 3473 tokens → 1024x2046 PNG ~1445 tokens · 20 cols · line ruler]`，模型不必猜自己看的是一栏还是二十栏。
 
 ## 折页卡
 
@@ -141,6 +152,9 @@ Web 上 compaction 在 preset isolate 里。Host 侧用 `agentPresets.serviceFor
 ```bash
 node --test lib/ledger.test.js
 
+# 版面经济性：每个 fixture 的文本/图像 token、承载行数、画布占用率。纯算术，不调模型
+node bench/layout-bench.mjs
+
 # 有一个用例绑定真实 dsh-session，指向已安装包才会运行
 DSH_SESSION_MODULE="$DSH/node_modules/@deepseek-ai/dsh-session/lib/index.js" \
 DSH_SCHEMASTER_MODULE="$DSH/node_modules/@deepseek-ai/schemastery/lib/index.mjs" \
@@ -153,7 +167,8 @@ DSH_SCHEMASTER_MODULE="$DSH/node_modules/@deepseek-ai/schemastery/lib/index.mjs"
 | `lib/schema-envelope.js` | 规范 Schemastery `{uid, refs}` 设置信封 |
 | `lib/ingress.js` | 上一步 `tool_result` 定形（结构上缓存安全） |
 | `lib/vision.js` | 密图：`inputModalities` + 设置双门 |
-| `lib/excerpt.js` / `lib/fold.js` / `lib/snapfont.js` | 摘录、折页卡、点阵 |
+| `lib/excerpt.js` / `lib/fold.js` / `lib/snapfont.js` | 摘录、折页卡、点阵与网格光栅化 |
+| `lib/layout.js` | 密图排版：选栏、格内折行、行号尺、占用率 |
 | `lib/hook.js` | 机械 `summarize` 钩子 |
 | `lib/resolve.js` | 查找 isolate 里的压缩引擎 |
 | `lib/index.js` | 命令、设置、pre-step |

@@ -1,6 +1,6 @@
 {
   "name": "dsh-ledger-compact",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "dsh-plugin: OMP-style ingress shaping plus optional local /fast-compact. Can replace DSH /compact and auto-compaction with a mechanical fold.",
   "license": "MIT",
   "author": "telagod",
@@ -48,12 +48,14 @@
   },
   "files": [
     "lib",
+    "bench",
     "cordis.patch.yml",
     "LICENSE",
     "README.md",
     "README.zh.md"
   ],
   "scripts": {
-    "test": "node --test lib/ledger.test.js"
+    "test": "node --test lib/ledger.test.js",
+    "bench": "node bench/layout-bench.mjs"
   }
 }

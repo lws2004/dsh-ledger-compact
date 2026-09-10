@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.6.0
+
+Dense-image layout: the PNG now fills the tile bands it pays for.
+
+### Added
+
+- **`lib/layout.js`** — pure grid planner for the ingress image: column packing, in-cell wrapping, the source-line ruler, and an occupancy measure that charges gutters and gaps to the layout that asks for them.
+- **Line ruler** in the raster: from 50 source lines up, the left gutter prints the source line number every 5 grid rows. An image stays addressable — a model that spots a bad row can `offset/limit` back to exact bytes instead of treating the picture as a dead end.
+- **Layered ink** in the raster: body `16`, column rules `205`, ruler `150` on paper `245`. Hierarchy that costs no image tokens, only pixels that are already paid for.
+- **`bench/layout-bench.mjs`** — per-fixture layout economics (text tokens, image tokens, lines carried, occupancy). Pure arithmetic, no model calls.
+- Layout tests: tile-band cap, column packing, wrap guard, wrapped outliers, ruler ink levels, and the economy gate.
+
+### Changed
+
+- **The canvas cap is tile-aligned.** openai-family frames are `1024×2048` instead of `1024×1540`; at 1540 the last 512px band bought four usable pixels. Same bill (1445 tokens), 93 text rows instead of 70.
+- **Short lines pack into columns.** The planner tries 1–24 columns and keeps the highest occupancy, rejecting any candidate that would wrap more than 2% of its cells. On a 3000-line numeric dump the same 1445 tokens now carry 1860 source lines instead of 93; a two-column layout doubles what a 60-character log fits.
+- **The image must beat the text it renders** (`IMAGE_ECONOMY = 0.85`). If the drawn text would have been cheaper as text, ingress falls back to the excerpt — the case where a nearly blank PNG was attached for very short lines is now refused.
+- The excerpt notice names the layout (`… PNG ~1445 tokens · 20 cols · line ruler`), so the model knows how the page is arranged.
+
+### Fixed
+
+- `wrapCell` no longer grows an empty trailing row when a line ends exactly on a cell edge.
+
 ## 0.5.0
 
 ### Added
