@@ -351,16 +351,41 @@ function numberedExcerpt(text, options = {}) {
  * fewer that appear at least three times, top eight by count. This is what a "how many
  * X are in this file" question needs and what neither the image nor an excerpt can give.
  */
-function tokenDigest(text, top = 8) {
+function countTokens(text) {
   const counts = new Map();
   for (const raw of String(text).split(/\s+/)) {
     const token = raw.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}%]+$/gu, "");
     if (!token || token.length > 16) continue;
     counts.set(token, (counts.get(token) ?? 0) + 1);
   }
-  const rows = [...counts].filter(([, n]) => n >= 3)
+  return counts;
+}
+
+function tokenDigest(text, top = 8) {
+  const rows = [...countTokens(text)].filter(([, n]) => n >= 3)
     .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, top);
   return rows.length === 0 ? "" : "whole-file totals: " + rows.map(([t, n]) => t + "×" + n).join(" · ");
+}
+
+/**
+ * Cumulative totals for the prefix ranges questions are actually asked about ("how many
+ * of the first ten…"). Short values first on ties, because a status code is a value and an
+ * IP or a path is structure.
+ */
+function blockDigest(text, ranges = [10, 20], top = 6) {
+  const lines = String(text).split("\n");
+  // Only values the whole file repeats are worth a block count: a numeric grid has
+  // nothing else to say, and reporting every unique token would be noise in every notice.
+  const whole = new Set([...countTokens(text)].filter(([, n]) => n >= 3)
+    .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, 8).map(([t]) => t));
+  return ranges.filter((n) => n < lines.length).map((n) => {
+    const rows = [...countTokens(lines.slice(0, n).join("\n"))]
+      // A one-off in the block is only worth a slot when it is short enough to be a
+      // code (a status, a flag) rather than a path or an identifier.
+      .filter(([t, c]) => whole.has(t) && (c >= 2 || t.length <= 4))
+      .sort((a, b) => b[1] - a[1] || a[0].length - b[0].length || (a[0] < b[0] ? -1 : 1)).slice(0, top);
+    return rows.length === 0 ? "" : "lines 1-" + n + ": " + rows.map(([t, c]) => t + "×" + c).join(" · ");
+  }).filter(Boolean).join("\n");
 }
 
 /** Each variant turns one axis: geometry, layout, prompt legend, ink colour, or budget. */
@@ -396,6 +421,8 @@ const VARIANTS = {
   "excerpt-lines": { build: withExcerpt(packed(8, 16, { gutterEvery: 1 }), {}, (text) => numberedExcerpt(text)), legend: false },
   /** Shipped in 0.13.0: the notice carries the whole-file totals. */
   "excerpt-digest": { build: withExcerpt(packed(8, 16, { gutterEvery: 1 }), {}, (text) => snapExcerpt(text) + "\n" + tokenDigest(text)), legend: false },
+  /** The same, plus cumulative totals for the 1-10 and 1-20 ranges. */
+  "excerpt-blocks": { build: withExcerpt(packed(8, 16, { gutterEvery: 1 }), {}, (text) => snapExcerpt(text) + "\n" + tokenDigest(text) + "\n" + blockDigest(text)), legend: false },
   "zebra": { build: zebra(8, 16, { gutterEvery: 1 }), legend: false },
   "digit-bold": { build: digitVariant("xorg-8x13-bold-digits.bin", 8, 16, { gutterEvery: 1 }), legend: false },
   /** Both free arms at once: the ship candidate if either mechanism is real. */

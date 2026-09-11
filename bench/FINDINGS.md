@@ -35,6 +35,7 @@ is cached; results live in `bench/report.md`, raw usage included.
 | **Seven fixes for the residual exact-value class** (row shading, bolder digits, bigger digit box, whitespace grouping, comma grouping, a deeper excerpt window, a trust hint in the prompt) | seven paired runs, 75–150 samples per arm | **rejected** — nothing beat the noise floor; digit grouping was measurably worse |
 | **The head/tail excerpt beside the image** (what the plugin actually sends; the bench had only ever measured the image alone) | paired 3-repeat, 75 questions per arm: value accuracy 70% → **91%** (net +12/57, p=0.002), 447 → 1000 tokens | **confirmed and shipped** — it rescues exactly the questions the image cannot answer, and a wider window adds nothing |
 | **Mechanical whole-file token totals in the notice** (`tokenDigest`, +50 tokens) | paired 6-repeat, 168 questions per arm: structure accuracy 35% → **78%** (net +23/54, p<0.0001), value unchanged (−1/114, p=1.00) | **shipped** — counting a file is free in text and impossible in a picture |
+| **Prefix totals** (`lines 1-10`, `lines 1-20`, +39 tokens) | paired 6-repeat, 168 questions per arm: 142 vs 141, net +1, p=1.00 — but "cases 0-19 PASS count" 0/6 → 6/6 and a role-colliding cjk count 6/6 → 1/6 | **rejected** — token counts are role-blind, and a plausible wrong number is worse than none |
 
 Colour is not removed from the library: `encodePngPalette` and the per-cell /
 per-digit ink options stay, tested and ready, should a future model show a gain.
@@ -260,6 +261,36 @@ Two questions lose two samples each (a 7-digit id, and the cases 0–19 count), 
 the value-class interval is for: **it excludes a value-accuracy loss larger than 7 points**.
 The line-numbered excerpt (`excerpt-lines`) measured neutral (+0 of 84, p=1.00) and did not
 ship.
+
+### Prefix totals are a wash, and the reason is the interesting part
+
+The obvious follow-up is to report the same totals for the prefix ranges questions are
+actually asked about ("how many of the first ten…"). `excerpt-blocks` adds two lines —
+`lines 1-10: GET×10 · 0800×10 · HTTP/1.1×10 · 200×9 · 503×1` and the same for 1-20 — built
+only from values the whole file repeats, dropping one-off tokens longer than four
+characters so a numeric grid adds no line at all. Paired 6-repeat, 168 questions per arm:
+**142/168 against 141/168, net +1, p=1.00**, for +39 tokens. It did not ship.
+
+The per-question result is not noise, though, and it is the reason to stop here:
+
+| question | whole-file totals | + prefix totals |
+| --- | --- | --- |
+| "among cases 0 through 19, how many are PASS" | 0/6 | **6/6** |
+| "of the first ten batches, how many have queue left 0" | **6/6** | 1/6 |
+| "how many of the first ten requests returned 503" | 3/6 | 3/6 |
+
+The first line of that table is the mechanism working: `lines 1-20: PASS×19 · FAIL×1` *is*
+the answer. The second is the mechanism failing, and its failure is predictable in hindsight:
+in the cjk fixture the token `0` appears four times in the first ten lines — in the `[0]`
+bracket, in "第 0 批", and as the queue field the question is about — so the block line says
+`0×4` where the honest answer is `1`. **A token count is role-blind.** The whole-file line
+gets away with the same blindness because `0×86` is nowhere near any range answer, so no one
+copies it; a prefix count of 4 looks like an answer, and it was copied.
+
+That is the rule this axis ends on: a mechanical digest helps when its numbers *are* the
+answer, and hurts when they are merely plausible. Everything past this point would need
+role-aware counting — per-field positions, per-column values — which is no longer mechanical
+general-purpose text, it is a schema the plugin would have to guess.
 
 ## Rule for the next change
 

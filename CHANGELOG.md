@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.13.1
+
+### Measured
+
+- **Prefix totals in the notice are a wash and did not ship.** `excerpt-blocks` adds
+  `lines 1-10:` / `lines 1-20:` token totals under the whole-file line: paired 6-repeat,
+  142/168 against 141/168 (net +1, p=1.00) for +39 tokens. The mechanism is visible in the
+  detail rather than the aggregate — "among cases 0 through 19, how many are PASS" goes
+  0/6 → **6/6** because `lines 1-20: PASS×19 · FAIL×1` *is* the answer, while a cjk count
+  goes 6/6 → 1/6 because the token `0` appears four times in the first ten lines (bracket,
+  batch number, queue field) and the block line says `0×4` where the answer is `1`.
+- **A token count is role-blind.** The whole-file line survives the same blindness because
+  `0×86` cannot be mistaken for a range answer; a prefix count of 4 can. Digest numbers help
+  when they *are* the answer and hurt when they are only plausible — the arm stays in the
+  bench as the record.
+
 ## 0.13.0
 
 The last coherent failure class was counting — how many FAILs, how many 503s, how many of
