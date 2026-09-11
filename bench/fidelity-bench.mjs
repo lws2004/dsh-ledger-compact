@@ -370,6 +370,13 @@ const VARIANTS = {
   "reread-address": { build: SHIPPED_BUILD, legend: false, read: true, notice: addressNotice },
   /** Address, plus the trust hint that measured neutral while there was nothing to act on. */
   "reread-hint": { build: SHIPPED_BUILD, legend: false, read: true, notice: addressNotice, hint: TRUST_HINT },
+  /**
+   * Model-authored compression, head to head with the frame: the summary alone, which is
+   * exactly what `absorb` leaves on the wire — no image, no excerpt, no digest.
+   */
+  "absorb": { build: SHIPPED_BUILD, legend: false, summary: 900 },
+  /** The same summary plus the one text channel a summary cannot replace: whole-file counts. */
+  "absorb-digest": { build: SHIPPED_BUILD, legend: false, summary: 900, summaryDigest: true },
   /** The same, plus cumulative totals for the 1-10 and 1-20 ranges. */
   "excerpt-blocks": { build: withExcerpt(packed(8, 16, { gutterEvery: 1 }), {}, (text) => snapExcerpt(text) + "\n" + tokenDigest(text) + "\n" + blockDigest(text)), legend: false },
   "zebra": { build: zebra(8, 16, { gutterEvery: 1 }), legend: false },
@@ -444,16 +451,15 @@ function toWire(png, hash) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function askOnce(key, dataUri, prompt) {
+async function askOnce(key, dataUri, prompt, withImage = true) {
+  const part = [{ type: "text", text: prompt }];
+  if (withImage) part.push({ type: "image_url", image_url: { url: dataUri } });
   const res = await fetch(ENDPOINT, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: "Bearer " + key },
     body: JSON.stringify({
       model: MODEL,
-      messages: [{ role: "user", content: [
-        { type: "text", text: prompt },
-        { type: "image_url", image_url: { url: dataUri } }
-      ]}],
+      messages: [{ role: "user", content: part }],
       max_tokens: 800,
       thinking: { type: "disabled" },
       stream: false
@@ -470,11 +476,11 @@ async function askOnce(key, dataUri, prompt) {
   };
 }
 
-async function ask(key, cache, keyOf, dataUri, prompt) {
+async function ask(key, cache, keyOf, dataUri, prompt, withImage = true) {
   const hit = cache[keyOf];
   if (hit) return { ...hit, cached: true };
   for (let attempt = 0; attempt < 3; attempt++) {
-    const out = await askOnce(key, dataUri, prompt);
+    const out = await askOnce(key, dataUri, prompt, withImage);
     if (!out.error) { cache[keyOf] = out; return { ...out, cached: false }; }
     if (!/^(429|5\d\d)/.test(out.error)) return out;
     await sleep(2000 * (attempt + 1));
@@ -611,6 +617,94 @@ async function askRead(key, cache, keyOf, dataUri, prompt, source) {
   return { error: "retries exhausted" };
 }
 
+// ---------------------------------------------------------------- model-authored compression
+//
+// The competing channel, measured head to head with the frame. `billion-context`'s `absorb`
+// hands each large tool result to the model with a rule set that says what must survive
+// verbatim, and the summary the model writes replaces the result from the next turn on.
+// These arms do the same, in chunks — their real system folds in ranges, not one call per
+// file — so the question "is a written summary a better use of the tokens than a rendered
+// image" is answered by the same paired protocol as every other verdict here.
+//
+// The rules are adapted from the load-bearing half of `acp-kernel`'s tier-1 rule text
+// (MIT, ranxianglei/acp-kernel, src/compression-rules.ts).
+
+const SUMMARY_RULES = [
+  "You are compressing one part of a long tool result so that a later reader can continue the",
+  "task without the original.",
+  "",
+  "KEEP VERBATIM — never paraphrase or abbreviate:",
+  "- Full file paths with line numbers, never a bare filename.",
+  "- Function, class and type signatures, and the critical code lines that encode logic.",
+  "- Error messages and stack traces, exact text.",
+  "- Exact values: versions, config keys, thresholds, ids, counts, timings, magic numbers.",
+  "- Key details from reports: the numbers and the mechanism, not just the conclusion.",
+  "- Decisions and their rationale — the 'because' is load-bearing.",
+  "- Constraints discovered, open questions, unresolved TODOs.",
+  "",
+  "DROP — extract the signal, discard the vessel:",
+  "- Verbose logs once the error line or the result is captured.",
+  "- Duplicate reads, consumed exploration, dead ends (keep the lesson in one line).",
+  "- Back-and-forth and self-corrections once the final position is captured.",
+  "",
+  "FORMAT: dense scannable bullets, grouped under short thematic headers when the part spans",
+  "distinct concerns. Every line must earn its place."
+].join("\n");
+
+/** Bump when the rules or the chunking change, so stale summaries cannot be reused. */
+const SUMMARY_VERSION = "s1";
+const SUMMARY_CHUNK_BYTES = 16000;
+
+/** One summarisation call, text only, cached like everything else. */
+async function summarize(key, cache, fixtureName, index, body, budget) {
+  const prompt = SUMMARY_RULES + "\n\nContext: this is part " + (index + 1) + " of a tool result named " +
+    fixtureName + ". Write at most ~" + budget + " tokens of summary.\n\n--- tool result part ---\n" + body;
+  const hash = createHash("sha256")
+    .update(["sum", MODEL, SUMMARY_VERSION, fixtureName, String(index), String(budget), prompt].join("|"))
+    .digest("hex").slice(0, 24);
+  const hit = cache[hash];
+  if (hit) return { ...hit, cached: true };
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const out = await askOnce(key, "", prompt, false);
+    if (!out.error) { cache[hash] = out; return { ...out, cached: false }; }
+    if (!/^(429|5\d\d)/.test(out.error)) return out;
+    await sleep(2000 * (attempt + 1));
+  }
+  return { error: "retries exhausted" };
+}
+
+/** Split on line boundaries, so a chunk never cuts a line in half. */
+function chunkText(text, maxBytes) {
+  const out = [];
+  let cur = [];
+  let size = 0;
+  for (const line of String(text).split("\n")) {
+    const bytes = Buffer.byteLength(line, "utf8") + 1;
+    if (size + bytes > maxBytes && cur.length > 0) { out.push(cur.join("\n")); cur = []; size = 0; }
+    cur.push(line);
+    size += bytes;
+  }
+  if (cur.length > 0) out.push(cur.join("\n"));
+  return out;
+}
+
+/** The summary one arm sends in place of the frame: `target` tokens over the whole result. */
+async function summarizeFixture(key, cache, fixture, target, text) {
+  const chunks = chunkText(text, SUMMARY_CHUNK_BYTES);
+  const budget = Math.max(120, Math.round(target / chunks.length));
+  const parts = [];
+  let promptTokens = 0;
+  let usd = 0;
+  for (let i = 0; i < chunks.length; i++) {
+    const out = await summarize(key, cache, fixture.name, i, chunks[i], budget);
+    if (out.error) return { error: out.error };
+    parts.push("[" + fixture.name + " part " + (i + 1) + "/" + chunks.length + "]\n" + String(out.answer).trim());
+    promptTokens += out.promptTokens ?? 0;
+    usd += usdFor(out.promptTokens, "cacheMiss", MODEL) ?? 0;
+  }
+  return { text: parts.join("\n\n"), promptTokens, usd, calls: chunks.length };
+}
+
 // ---------------------------------------------------------------- main
 
 
@@ -666,25 +760,37 @@ for (const fixture of all) {
     const dataUri = "data:" + wire.mediaType + ";base64," + Buffer.from(wire.data).toString("base64");
     // Price what will actually be sent, at the budget under test.
     const estTok = deepseekImageTokens(preview.width, preview.height);
-    const baseNotice = "[Snapcompact: " + textTok + " tokens → " + framed.w + "x" + framed.h + " PNG" +
-      (preview.resized ? " (preview " + preview.width + "x" + preview.height + ")" : "") +
-      " ~" + estTok + " tokens" + note + "]";
+    // Model-authored arms: one summary per fixture per target, paid for once and reported
+    // per answer so the two channels are compared at their real cost.
+    const summarized = spec.summary ? await summarizeFixture(key, cache, fixture, spec.summary, text) : null;
+    if (summarized?.error) throw new Error("summarise failed for " + fixture.name + ": " + summarized.error);
+    const armText = summarized
+      ? summarized.text + (spec.summaryDigest ? "\n" + tokenDigest(text) : "")
+      : built.excerpt;
+    const summaryUsd = summarized ? summarized.usd / Math.max(1, fixture.qa.length * REPEATS) : 0;
+    const armEstTok = summarized ? estTokensUtf8(armText) : estTok;
+    const baseNotice = summarized
+      ? "[Snapcompact: " + textTok + " tokens → written summary ~" + estTokensUtf8(summarized.text) + " tokens]"
+      : "[Snapcompact: " + textTok + " tokens → " + framed.w + "x" + framed.h + " PNG" +
+        (preview.resized ? " (preview " + preview.width + "x" + preview.height + ")" : "") +
+        " ~" + estTok + " tokens" + note + "]";
     const notice = spec.notice ? spec.notice(baseNotice) : baseNotice;
     const carried = framed.sourceLines ?? (framed.gridRows !== undefined ? framed.gridRows * (framed.columns ?? 1) : framed.rows);
     for (const qa of fixture.qa) {
       if (calls >= MAX_CALLS) break outer;
       const prompt = (spec.hint ? spec.hint + "\n" : "") + (spec.legend ? LEGEND + "\n" : "") + notice +
-        (built.excerpt ? "\n" + built.excerpt : "") +
+        (armText ? "\n" + armText : "") +
         "\nQuestion: " + qa.q + "\nAnswer with only the answer.";
       for (let repeat = 0; repeat < REPEATS; repeat++) {
         // Repeat 0 keeps the plain key, so earlier single-sample runs are reused as-is.
         const parts = [MODEL, variant, fixture.name, qa.q, dataUri];
         if (repeat > 0) parts.push("r" + repeat);
         if (spec.read) parts.push("read" + READ_ROUNDS + READ_ACCOUNTING);
+        if (summarized) parts.push("noimg" + SUMMARY_VERSION + spec.summary);
         const hash = createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 24);
         const out = spec.read
           ? await askRead(key, cache, hash, dataUri, prompt, text)
-          : await ask(key, cache, hash, dataUri, prompt);
+          : await ask(key, cache, hash, dataUri, prompt, !summarized);
         if (!out.error) calls += 1;
         const usd = usdFor(out.promptTokens, "cacheMiss", MODEL);
         results.push({
@@ -693,7 +799,8 @@ for (const fixture of all) {
           correct: !out.error && matches(out.answer, qa.a),
           finish: out.finish ?? "",
           drawn: framed.w + "x" + framed.h, sent: preview.width + "x" + preview.height,
-          carried, estTok, measured: out.promptTokens ?? null, usd: usd ?? null,
+          carried, estTok: armEstTok, measured: out.promptTokens ?? null,
+          usd: (usd ?? 0) + summaryUsd, summaryUsd, summaryCalls: summarized?.calls ?? 0,
           textUsd: usdFor(textTok, "cacheMiss", MODEL), cached: out.cached === true,
           // Re-read arms only: which lines were asked for, how many rounds it took, and the
           // share of the bill that is the ingress sent again — a context-cache hit, 50x cheaper.

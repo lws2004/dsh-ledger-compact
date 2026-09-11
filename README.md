@@ -143,6 +143,7 @@ Two things below are measured, not assumed:
 - **The misses are a confabulation channel, not a noise channel** (`bench/miss-audit.mjs`, no model calls): of 53 wrong answers in 336, **52 are well-formed and plausible** — 47 are values that occur verbatim in the file asked about and 51 have the same digit width as the truth (`1001110` → `1001147`, `261` → `$268`, `29` → `42`). Exactly one refutes itself with a shape or range check. A lossy codec garbles and announces it; this channel substitutes a real value and leaves no signal, so `$/correct` prices a wrong answer here below what it costs.
 - **The re-read the notice promises works, and nothing cheap makes the model take it** (`read: true` arms, paired 3-repeat, 84 answers per arm against the frozen control in the same run): with the read simply available the model asks on **8%** of answers and scores 66/84 against the frozen 71/84; one extra notice line naming the coordinates — the gutter labels are source line numbers, `read_result(offset=N)` returns those bytes — triples the ask rate to **29%** and still scores 69/84, for 41–83% more tokens. The reads themselves are good: **17 of 18 aimed reads were right**, and the 7-digit id that is a wall from the image goes **0/3 → 2/3**. The arm loses anyway, because the extra asking also lands on the counting questions, where a window of text is worse than the whole-file digest. The re-read itself is nearly free: 75–85% of the re-sent prefix comes back as a cache hit, so the extra rounds add 2–9%, not 41–83%.
 - **The bench's own scorer had three silent escaping bugs** — a doubled backslash inside three regex literals, so the whitespace strip never fired, the number-prefix branch was dead, and the 5xx retry never retried on a 5xx. Re-deciding all 336 stored answers changes no verdict (the model happened to answer `52ms` where `52ms` was expected), but the matcher now lives in `bench/match.mjs` and `bench/miss-audit.mjs` recomputes every verdict rather than trusting the stored flag.
+- **A written summary loses to the frame, and how it loses is the interesting part** (`absorb` / `absorb-digest` arms: blind chunked summarisation under `acp-kernel`'s tier-1 rules, sent in place of the image — this is what `billion-context`'s `absorb` leaves on the wire): 57/84 and 56/84 against the frame's 71/84, paired nets **−14 (p=0.0066)** and **−15 (p=0.0007)**, carrying *more* tokens per later request (1250 / 1300 against 1097) and costing 3x. It wins where the file is **rule-generated** — `seq-3000`, the integers 1..3000, scores 15/15 against the frame's 14/15 for 230 tokens against 542 — and loses where the question names an arbitrary instance: on `test-log` the summary found the generator ("durations step by 13 ms") and then answered `13ms` where the truth was `52ms`. **It applies the rule instead of reading the row.** Its misses are 27–28 against 13, with the same 100% silence — the image invents a value that was in the file, the summary invents one that was never anywhere.
 
 ## Fold card
 
@@ -197,6 +198,10 @@ node bench/miss-audit.mjs
 # the re-read arms: the model gets read_result(offset, limit), and the run records what it
 # does with it, aimed where, and what the repeat rounds cost
 node bench/fidelity-bench.mjs --variants excerpt-digest,reread-base,reread-address,reread-hint --repeats 3
+
+# the competing channel: the model writes the summary that replaces the result, as
+# billion-context's absorb does — measured head to head with the frame in one run
+node bench/fidelity-bench.mjs --variants excerpt-digest,absorb,absorb-digest --repeats 3
 
 # one test binds a real dsh-session; point it at the installed package to run it
 DSH_SESSION_MODULE="$DSH/node_modules/@deepseek-ai/dsh-session/lib/index.js" \

@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.13.4
+
+The one competing design that runs at this plugin's layer is `billion-context`'s `absorb`: hand
+a tool result to the model with rules saying what must survive verbatim, and let the summary it
+writes replace the original. It can be put on this bench, so it was. No `lib/` change.
+
+### Added
+
+- **`absorb` / `absorb-digest` arms**: blind chunked summarisation (16 KB chunks, 900-token
+  target) under the load-bearing half of `acp-kernel`'s tier-1 rules (MIT,
+  `src/compression-rules.ts`), sent in place of the frame — no image, no excerpt, and for
+  `absorb-digest` the whole-file counts added back. The summariser never sees the questions.
+- **A channel comparison** in `bench/miss-audit.mjs`: carrying tokens per answer, amortised
+  production cost, per-fixture wins, and the silent-miss profile per arm.
+
+### Measured
+
+- **The written summary loses on every axis at once.** Paired 3-repeat, 84 answers per arm:
+  57/84 and 56/84 against the frame's 71/84 (nets −14 p=0.0066, −15 p=0.0007), carrying **more**
+  tokens per later request (1250 / 1300 against 1097) and costing 3x. Amortise the summary's
+  production to zero and it is still more expensive to carry ($0.000375 against $0.000329),
+  because it is bigger than what it replaced.
+- **It wins where the file is rule-generated and loses where the question names an instance.**
+  `seq-3000` (the integers 1..3000): 15/15 against the frame's 14/15, for 230 tokens against 542.
+  `id-grid` (1500 near-identical rows): 1/15 against 6/15. `test-log`: the summary found the
+  generator — "durations step by 13 ms" — and then answered `13ms`/`143ms` where the truth was
+  `52ms`/`156ms`. **It applies the rule instead of reading the row.**
+- **The error channel multiplies rather than improving**: 27–28 misses against 13, with the same
+  100% silence. This is the failure `billion-context` was itself bitten by, when a session stored
+  a fabricated verbatim user quote as a live "CURRENT TASK" and the work relapsed into a loop.
+- Not measured: task-aware compression. The arm summarises blind; their `compress` runs inside a
+  live session and distils again in tiers. That difference is real and is stated as a limit.
+
+### Unchanged
+
+- `lib/` is untouched. The frame remains the shipped channel, with the written summary recorded
+  as the complement it is: better exactly when the content is a rule rather than a record.
+
 ## 0.13.3
 
 The re-read contract the plugin has always advertised — "re-read with offset/limit", with the

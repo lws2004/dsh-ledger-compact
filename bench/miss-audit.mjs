@@ -115,6 +115,18 @@ for (const f of byFixture) {
 }
 
 console.log("\n## Would a caller notice?\n");
+/**
+ * Would a caller notice? A count that exceeds the range it counts refutes itself, and so
+ * does prose where the question demanded a bare number. Everything else is silent.
+ */
+function isRefutable(r) {
+  const answer = String(r.answer).trim();
+  const range = /first ten/i.test(r.qa) ? 10 : (r.qa.match(/first (\d+)/) ?? r.qa.match(/前 (\d+)/) ?? [])[1];
+  const counted = /how many|几批|几/i.test(r.qa) && range != null && bare(answer) && Number(answer) > Number(range);
+  const shaped = /只回答数字|Answer with a number/i.test(r.qa) && !bare(answer);
+  return counted || shaped;
+}
+
 const misses = run.filter((r) => !r.correct);
 let refutable = 0;
 let silent = 0;
@@ -124,14 +136,9 @@ const perFixture = new Map();
 for (const r of misses) {
   const answer = String(r.answer).trim();
   const expected = String(r.expected).trim();
-  // A count question whose answer exceeds the range it counts refutes itself; so does a
-  // question that demanded a bare number and got prose back.
-  const range = /first ten/i.test(r.qa) ? 10 : (r.qa.match(/first (\d+)/) ?? r.qa.match(/前 (\d+)/) ?? [])[1];
-  const counted = /how many|几批|几/i.test(r.qa) && range != null && bare(answer) && Number(answer) > Number(range);
-  const shaped = /只回答数字|Answer with a number/i.test(r.qa) && !bare(answer);
   const present = tok(answer) !== "" && sources.get(r.fixture)?.includes(tok(answer));
   const width = tok(answer).length > 0 && tok(answer).length === tok(expected).length;
-  if (counted || shaped) refutable += 1;
+  if (isRefutable(r)) refutable += 1;
   else silent += 1;
   if (present) inSource += 1;
   if (width) sameWidth += 1;
@@ -210,3 +217,54 @@ if (readArms.length > 0) {
   );
 }
 
+// ---------------------------------------------------------------- two channels
+
+/**
+ * The frame and the written summary, on the same questions. "Carries" is what every later
+ * request pays for the channel; "wrote" is the one-off model call that produced the summary,
+ * amortised over the answers this run happens to ask. In a real session a summary is re-sent
+ * for far more turns than a bench asks questions, so read the carrying column as the steady
+ * state and the production column as an upper bound.
+ */
+const summaryArms = variants.filter((v) => run.some((r) => r.variant === v && (r.summaryCalls ?? 0) > 0));
+const plainArms = variants.filter((v) => !summaryArms.includes(v) && !readArms.includes(v));
+if (summaryArms.length > 0 && plainArms.length > 0) {
+  const stat = (rows) => {
+    const val = rows.filter((r) => r.kind === "value");
+    const str = rows.filter((r) => r.kind === "structure");
+    const wrong = rows.filter((r) => !r.correct);
+    return {
+      n: rows.length,
+      ok: rows.filter((r) => r.correct).length,
+      value: val.filter((r) => r.correct).length + "/" + val.length,
+      structure: str.filter((r) => r.correct).length + "/" + str.length,
+      carry: mean(rows.map((r) => r.measured ?? 0)),
+      prod: rows.reduce((s, r) => s + (r.summaryUsd ?? 0), 0) / rows.length,
+      calls: Math.max(0, ...rows.map((r) => r.summaryCalls ?? 0)),
+      usd: mean(rows.map((r) => r.usd ?? 0)),
+      silent: wrong.filter((r) => !isRefutable(r)).length,
+      wrong: wrong.length,
+    };
+  };
+  const order = [...plainArms, ...summaryArms];
+  console.log("\n## Two channels, the same questions\n");
+  console.log("| arm | carries tok/answer | wrote per answer | summary calls | correct | value | structure | $/answer | silent / all misses |");
+  console.log("| --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+  for (const v of order) {
+    const s = stat(run.filter((r) => r.variant === v));
+    console.log(
+      `| \`${v}\` | ${s.carry.toFixed(0)} | ${s.prod ? usd(s.prod) : "—"} | ${s.calls || "—"} | ` +
+      `${s.ok}/${s.n} | ${s.value} | ${s.structure} | ${usd(s.usd)} | ${s.silent}/${s.wrong} |`,
+    );
+  }
+  console.log("\n### Where each channel wins\n");
+  console.log("| fixture | " + order.map((v) => "\`" + v + "\`").join(" | ") + " |");
+  console.log("| --- |" + order.map(() => " --- |").join(""));
+  for (const f of byFixture) {
+    const cells = order.map((v) => {
+      const R = run.filter((r) => r.fixture === f && r.variant === v);
+      return R.length === 0 ? "—" : R.filter((r) => r.correct).length + "/" + R.length;
+    });
+    console.log("| \`" + f + "\` | " + cells.join(" | ") + " |");
+  }
+}

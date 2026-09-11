@@ -40,6 +40,7 @@ is cached; results live in `bench/report.md`, raw usage included.
 | **Trading a silent error for a caught one** (same audit) | 53 misses of 336: **52 are well-formed and plausible**, 47 are values that occur verbatim in the file asked about, 51 have the same digit width as the truth; **1** refutes itself | **new axis, and the binding one** — `$/correct` scores a silent confabulation the same as a caught one; a caller cannot |
 | **Offering the read the notice promises** (arms that declare `read: true`; paired 3-repeat, 84 answers each, control in the same run) | 66–69/84 against the frozen control's 71/84 (nets −5, −2, −5; p=0.38, 0.79, 0.33) for 41–83% more tokens — but **17 of 18 aimed reads were right**, and the 7-digit-id wall goes 0/3 → 2/3 | **rejected** — the mechanism is real and worth keeping reachable; the reads also land on the counting class, where a window is worse than the digest, and that costs more than it returns |
 | **Naming the coordinates** (one notice line, ~30 tokens: the gutter labels are source line numbers and `read_result(offset=N)` returns those bytes) | ask rate **8% → 29%**, aimed reads 6 → 18, value +1 of 57, structure 22/27 → 19/27 | **rejected** — it makes the re-read decision cheap, which is not what was missing; coverage is, and it cannot be selective from the ingress |
+| **A written summary instead of the frame** (`absorb` / `absorb-digest`; same fixtures and questions, blind 16 KB chunked summarisation under `acp-kernel`'s tier-1 rules) | 57/84 and 56/84 against the frame's 71/84 (paired nets −14 p=0.0066, −15 p=0.0007), carrying **more** tokens per request (1250 / 1300 vs 1097) and costing 3x — but 15/15 on `seq-3000` where the frame is 14/15, at 230 tokens against 542 | **rejected as a replacement, kept as a complement** — it wins where the file is rule-generated, loses where the question names an arbitrary instance, and answers an instance question with the rule (`52ms` → `13ms`) |
 
 Colour is not removed from the library: `encodePngPalette` and the per-cell /
 per-digit ink options stay, tested and ready, should a future model show a gain.
@@ -431,6 +432,85 @@ They are fixed, and the matcher now lives in `bench/match.mjs` shared with `miss
 which recomputes every verdict instead of trusting the stored flag. A scoring bug that flatters
 every arm at once is exactly what the audit exists to catch.
 
+## A written summary loses to the frame, and how it loses is the interesting part
+
+`billion-context` compresses by handing a tool result to the model with a rule set that says
+what must survive verbatim, and letting the summary it writes replace the original. Its
+`absorb` runs at exactly this plugin's layer — tool result in, compact representation out — so
+it is the one competing design that can be put on this bench. Two arms do it: `absorb` is the
+summary alone, which is what absorb leaves on the wire (no image, no excerpt, no digest), and
+`absorb-digest` adds back the one text channel a summary cannot replace, the whole-file counts.
+
+Both summarise **blind** — they never see the questions — in 16 KB chunks, targeting 900 tokens
+over the whole result, following the load-bearing half of `acp-kernel`'s tier-1 rules
+(`src/compression-rules.ts`, MIT). Paired 3-repeat, 84 answers per arm, control in the same run:
+
+| arm | correct | value | structure | carries tok/answer | $/answer | $/correct |
+| --- | --- | --- | --- | --- | --- | --- |
+| `excerpt-digest` — the frame, what ships | **71/84** | 49/57 | **22/27** | 1097 | $0.000329 | $0.000389 |
+| `absorb` — the written summary alone | 57/84 | 41/57 | 16/27 | 1250 | $0.001018 | $0.001500 |
+| `absorb-digest` — summary plus whole-file counts | 56/84 | 36/57 | 20/27 | 1300 | $0.001033 | $0.001549 |
+
+Paired nets **−14 (p=0.0066)** and **−15 (p=0.0007)**. A written summary loses on every axis at
+once: fewer right, more tokens carried on every later request, three times the money.
+
+Production cost is not the reason. Amortise it to zero and `absorb` still carries $0.000375 per
+answer against the frame's $0.000329, because the summary is **bigger than what it replaced**.
+The frame is one 1024x624 image whatever the file weighs and the excerpt is capped at 24 lines;
+the summary is whatever the model felt like writing, and it overshot its 900-token budget on
+every fixture but `seq-3000`.
+
+### Where each channel wins, and why
+
+| fixture | frame | `absorb` | `absorb-digest` | carries: frame / summary |
+| --- | --- | --- | --- | --- |
+| `seq-3000` — the integers 1..3000 | 14/15 | **15/15** | **15/15** | 542 / **230** |
+| `cjk-log` — 700 generated log lines | **15/15** | 14/15 | 13/15 | 1204 / **1149** |
+| `test-log` — 1500 PASS/FAIL lines | **15/18** | 14/18 | 7/18 | 775 / 857 |
+| `access-log` — 2000 request lines | **21/21** | 13/21 | **21/21** | 1799 / 2498 |
+| `id-grid` — 1500 near-identical rows | **6/15** | 1/15 | 0/15 | 947 / 1097 |
+
+The summary wins exactly where the file is *generated by a rule*, and loses where the question
+is about an arbitrary instance:
+
+- `seq-3000`: the summary says "the file is the integers 1 to 3000" in 174 tokens — smaller and
+  more accurate than a bitmap of 761 numbers.
+- `id-grid`: 1500 rows do not fit in a summary and the questions name specific ones. 1/15.
+- `test-log`: the summary found the generator — "FAIL at case-11 + 97k", "durations step by
+  13 ms" — and then answered **`13ms`, `143ms`, `13ms`** where the truth was **`52ms`, `156ms`,
+  `130ms`**. It applied the rule instead of reading the row. The rule is real; the row is not
+  determined by it.
+
+That is the failure in one line: **a summary compresses by extracting the rule, and a question
+about an instance is then answered with the rule.** The frame has the opposite profile — it
+cannot tell you the rule, but every instance is present to be read, so its errors are
+misreadings rather than inventions.
+
+### The error channel does not improve, it multiplies
+
+| arm | misses | silent — no shape or range check could catch it |
+| --- | --- | --- |
+| `excerpt-digest` | 13 | 13 |
+| `absorb` | 27 | 26 |
+| `absorb-digest` | 28 | 28 |
+
+The written summary produces twice as many misses and the same total silence. This is the
+channel `billion-context` was itself bitten by: its rule file carries a 2026-09-06 amendment
+after a session stored a **fabricated verbatim user quote as a live "CURRENT TASK"** and the
+work relapsed into a loop. Same disease as the 52-silent-misses section above, in a different
+organ — the image invents a value that was in the file; the summary invents a value that was
+never anywhere.
+
+### What this does not measure
+
+The arm summarises **blind**: no task, no session, no later turns, one pass per chunk.
+`billion-context`'s main path is not blind — `compress` runs inside a live session where the
+model knows what it is working on, and the tiers distil old summaries with that work in front
+of them. Task-aware compression should do better than this arm, and that difference is real and
+not reproduced here. What the run does settle is the narrower claim its `absorb` makes: for a
+single tool result, handed over with the rules and nothing else, a written summary is not a
+better use of the tokens than a frame.
+
 ## Rule for the next change
 
 Ship a layout change only when it beats the control by more than the noise floor on a
@@ -445,3 +525,8 @@ And test the contract, not just the frame. The re-read axis looked settled for t
 because every arm measured a frozen ingress; the moment the read existed, one line of notice
 tripled the rate and the hard-value wall fell from 0/3 to 2/3 in the same run. Run the arms
 that declare `read: true` before concluding anything about what the notice promises.
+
+And when two channels are both available, prefer the one whose errors are **misreadings** to
+the one whose errors are **inventions**. The frame is wrong about a value that was in the file;
+a written summary is wrong about a value that was never anywhere — and both are equally silent,
+so the only thing that separates them is how often the underlying content was there to be read.
