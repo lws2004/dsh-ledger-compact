@@ -32,10 +32,14 @@ import { formatUsd, priceFor, requestPreviewSize, usdFor } from "../lib/pricing.
 import { estTokensUtf8 } from "../lib/tokens.js";
 import { SNAP_HEAD_LINES, SNAP_TAIL_LINES, snapExcerpt } from "../lib/excerpt.js";
 import { fixtures } from "./fixtures.mjs";
+import { matches } from "./match.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const CACHE_PATH = join(here, ".cache", "fidelity.json");
 const REPORT_PATH = join(here, "report.md");
+/** The raw rows of the last paid run. Tracked, because the call cache is not: this is the
+ *  only copy of the answers that survives a clone, and the evidence miss-audit re-reads. */
+const RESULTS_PATH = join(here, "results.json");
 const CREDENTIALS = join(process.env.DSH_HOME ?? "/home/telagod/.dsh", ".credentials.yaml");
 
 const argv = process.argv.slice(2);
@@ -59,6 +63,16 @@ const REPEATS = Math.max(1, Number(flag("repeats", "1")) || 1);
 const BUDGET = Number(flag("budget", "640000")) || 640000;
 /** Write each variant's frame to bench/.cache/dump instead of asking the model. */
 const DUMP = argv.includes("--dump");
+/**
+ * Arms that declare `read: true` get the read the notice promises ("re-read with
+ * offset/limit"), and the bench records what they do with it. It is a property of the arm
+ * rather than a global switch so that one paired run can hold the frozen ingress and the
+ * re-read arms side by side.
+ */
+/** Tool rounds allowed per answer: one to ask, then READ_ROUNDS of reading. */
+const READ_ROUNDS = Math.max(1, Number(flag("read-rounds", "3")) || 3);
+/** Bump when a read arm records something new, so stale cache entries cannot be reused. */
+const READ_ACCOUNTING = "u2";
 
 function credential(ref) {
   const text = readFileSync(CREDENTIALS, "utf8");
@@ -302,6 +316,17 @@ function blockDigest(text, ranges = [10, 20], top = 6) {
   }).filter(Boolean).join("\n");
 }
 
+/** What ships today: the packed frame, the head/tail excerpt, the whole-file digest. */
+const SHIPPED_BUILD = withExcerpt(packed(8, 16, { gutterEvery: 1 }), {}, (text) => snapExcerpt(text) + "\n" + tokenDigest(text));
+
+/**
+ * Name the coordinate system. The gutter already prints source line numbers and the notice
+ * already says "re-read with offset/limit" — but nothing says those are the same numbering,
+ * so the model has to guess that the row label it can see is the offset it must pass. One
+ * line, ~30 tokens, and it is the whole of the cheap half of the re-read decision.
+ */
+const addressNotice = (base) => base + "\nEvery row of the image is labelled with its source line number; read_result(offset=<that number>) returns those exact bytes.";
+
 /** Each variant turns one axis: geometry, layout, prompt legend, ink colour, or budget. */
 const VARIANTS = {
   ruler1: { build: packed(8, 16, { gutterEvery: 1 }), legend: false },
@@ -335,6 +360,16 @@ const VARIANTS = {
   "excerpt-lines": { build: withExcerpt(packed(8, 16, { gutterEvery: 1 }), {}, (text) => numberedExcerpt(text)), legend: false },
   /** Shipped in 0.13.0: the notice carries the whole-file totals. */
   "excerpt-digest": { build: withExcerpt(packed(8, 16, { gutterEvery: 1 }), {}, (text) => snapExcerpt(text) + "\n" + tokenDigest(text)), legend: false },
+  /**
+   * The re-read arms. Every arm above measures a frozen ingress — but the plugin ships a
+   * contract ("re-read with offset/limit") that the bench has never once exercised. These
+   * give the model the read it promises and record what it does with it.
+   */
+  "reread-base": { build: SHIPPED_BUILD, legend: false, read: true },
+  /** The same, with the notice naming the coordinates the image and the tool already share. */
+  "reread-address": { build: SHIPPED_BUILD, legend: false, read: true, notice: addressNotice },
+  /** Address, plus the trust hint that measured neutral while there was nothing to act on. */
+  "reread-hint": { build: SHIPPED_BUILD, legend: false, read: true, notice: addressNotice, hint: TRUST_HINT },
   /** The same, plus cumulative totals for the 1-10 and 1-20 ranges. */
   "excerpt-blocks": { build: withExcerpt(packed(8, 16, { gutterEvery: 1 }), {}, (text) => snapExcerpt(text) + "\n" + tokenDigest(text) + "\n" + blockDigest(text)), legend: false },
   "zebra": { build: zebra(8, 16, { gutterEvery: 1 }), legend: false },
@@ -441,7 +476,136 @@ async function ask(key, cache, keyOf, dataUri, prompt) {
   for (let attempt = 0; attempt < 3; attempt++) {
     const out = await askOnce(key, dataUri, prompt);
     if (!out.error) { cache[keyOf] = out; return { ...out, cached: false }; }
-    if (!/^(429|5\\d\\d)/.test(out.error)) return out;
+    if (!/^(429|5\d\d)/.test(out.error)) return out;
+    await sleep(2000 * (attempt + 1));
+  }
+  return { error: "retries exhausted" };
+}
+
+// ---------------------------------------------------------------- the re-read
+
+/**
+ * What the model is promised: the frame's left gutter prints source line numbers, and the
+ * notice says exact bytes are one re-read away. This is that re-read, described the way a
+ * harness would describe it — it does not say the gutter and the tool share a numbering,
+ * because that is the thing the arms are testing.
+ */
+const READ_TOOL = {
+  type: "function",
+  function: {
+    name: "read_result",
+    description: "Read exact source lines of the tool result this image renders.",
+    parameters: {
+      type: "object",
+      properties: {
+        offset: { type: "number", description: "1-based first line to return" },
+        limit: { type: "number", description: "how many lines to return (default 20, max 200)" }
+      },
+      required: ["offset"]
+    }
+  }
+};
+
+async function readOnce(key, messages) {
+  const res = await fetch(ENDPOINT, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: "Bearer " + key },
+    body: JSON.stringify({
+      model: MODEL,
+      messages,
+      tools: [READ_TOOL],
+      max_tokens: 800,
+      thinking: { type: "disabled" },
+      stream: false
+    })
+  });
+  const text = await res.text();
+  if (res.status !== 200) return { error: res.status + " " + text.slice(0, 160) };
+  const json = JSON.parse(text);
+  return {
+    message: json.choices?.[0]?.message ?? {},
+    finish: json.choices?.[0]?.finish_reason ?? "",
+    promptTokens: json.usage?.prompt_tokens ?? null,
+    completionTokens: json.usage?.completion_tokens ?? null,
+    // The provider splits the prompt itself; a re-sent prefix is a cache hit at 1/50 the
+    // price, and whether it really hits is the difference between a re-read costing a
+    // fraction of a cent and costing a whole second send.
+    cacheHit: json.usage?.prompt_cache_hit_tokens ?? null,
+    cacheMiss: json.usage?.prompt_cache_miss_tokens ?? null
+  };
+}
+
+/**
+ * Ask, then serve whatever reads the model asks for, up to READ_ROUNDS. The prompt is
+ * re-sent with every round, so the bill is split: `firstTok` is the ingress as every other
+ * arm pays for it, and `extraTok` is what the reads add — the same prefix again, which the
+ * provider's context cache prices 50x cheaper than a fresh send.
+ */
+async function askWithRead(key, dataUri, prompt, source) {
+  const lines = String(source).split("\n");
+  const messages = [{ role: "user", content: [
+    { type: "text", text: prompt },
+    { type: "image_url", image_url: { url: dataUri } }
+  ]}];
+  const reads = [];
+  let firstTok = null;
+  let extraTok = 0;
+  let outputTok = 0;
+  let hitTok = 0;
+  let missTok = 0;
+  let extraHitTok = 0;
+  let extraMissTok = 0;
+  for (let round = 0; round <= READ_ROUNDS; round++) {
+    const out = await readOnce(key, messages);
+    if (out.error) return { error: out.error, reads };
+    const hit = out.cacheHit ?? 0;
+    const miss = out.cacheMiss ?? (out.promptTokens ?? 0);
+    hitTok += hit;
+    missTok += miss;
+    if (round === 0) firstTok = out.promptTokens;
+    else {
+      extraTok += out.promptTokens ?? 0;
+      extraHitTok += hit;
+      extraMissTok += miss;
+    }
+    outputTok += out.completionTokens ?? 0;
+    const asked = out.message.tool_calls ?? [];
+    if (asked.length === 0) {
+      return {
+        answer: out.message.content ?? "", finish: out.finish, reads, rounds: round,
+        firstTok, extraTok, completionTokens: outputTok, promptTokens: (firstTok ?? 0) + extraTok,
+        hitTok, missTok, extraHitTok, extraMissTok
+      };
+    }
+    messages.push(out.message);
+    for (const call of asked) {
+      let args = {};
+      try { args = JSON.parse(call.function?.arguments || "{}"); } catch { args = {}; }
+      const offset = Math.max(1, Math.min(lines.length, Math.trunc(Number(args.offset)) || 1));
+      const limit = Math.max(1, Math.min(200, Math.trunc(Number(args.limit)) || 20));
+      const slice = lines.slice(offset - 1, offset - 1 + limit);
+      reads.push({ offset, limit });
+      messages.push({
+        role: "tool",
+        tool_call_id: call.id,
+        content: slice.map((line, i) => (offset + i) + "| " + line).join("\n") || "(past the end of the result)"
+      });
+    }
+  }
+  return {
+    answer: "", finish: "read-limit", reads, rounds: READ_ROUNDS + 1,
+    firstTok, extraTok, completionTokens: outputTok, promptTokens: (firstTok ?? 0) + extraTok,
+    hitTok, missTok, extraHitTok, extraMissTok
+  };
+}
+
+async function askRead(key, cache, keyOf, dataUri, prompt, source) {
+  const hit = cache[keyOf];
+  if (hit) return { ...hit, cached: true };
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const out = await askWithRead(key, dataUri, prompt, source);
+    if (!out.error) { cache[keyOf] = out; return { ...out, cached: false }; }
+    if (!/^(429|5\d\d)/.test(out.error)) return out;
     await sleep(2000 * (attempt + 1));
   }
   return { error: "retries exhausted" };
@@ -449,20 +613,7 @@ async function ask(key, cache, keyOf, dataUri, prompt) {
 
 // ---------------------------------------------------------------- main
 
-const normalize = (s) => String(s ?? "").replace(/\\s+/g, "").toLowerCase();
 
-/** Containment with number/letter boundaries, so "1050" never satisfies "105". */
-function matches(answer, expected) {
-  const a = normalize(answer);
-  const e = normalize(expected);
-  if (!a || !e) return false;
-  if (a === e) return true;
-  const esc = e.replace(/[.*+?^$`{}()|[\]\\]/g, "\\$&");
-  if (new RegExp("(^|[^0-9a-z])" + esc + "($|[^0-9a-z])").test(a)) return true;
-  const num = e.match(/^(\\d+)/);
-  if (num && new RegExp("(^|[^0-9])" + num[1] + "($|[^0-9])").test(a)) return true;
-  return false;
-}
 
 const cacheDir = dirname(CACHE_PATH);
 if (!existsSync(cacheDir)) mkdirSync(cacheDir, { recursive: true });
@@ -515,9 +666,10 @@ for (const fixture of all) {
     const dataUri = "data:" + wire.mediaType + ";base64," + Buffer.from(wire.data).toString("base64");
     // Price what will actually be sent, at the budget under test.
     const estTok = deepseekImageTokens(preview.width, preview.height);
-    const notice = "[Snapcompact: " + textTok + " tokens → " + framed.w + "x" + framed.h + " PNG" +
+    const baseNotice = "[Snapcompact: " + textTok + " tokens → " + framed.w + "x" + framed.h + " PNG" +
       (preview.resized ? " (preview " + preview.width + "x" + preview.height + ")" : "") +
       " ~" + estTok + " tokens" + note + "]";
+    const notice = spec.notice ? spec.notice(baseNotice) : baseNotice;
     const carried = framed.sourceLines ?? (framed.gridRows !== undefined ? framed.gridRows * (framed.columns ?? 1) : framed.rows);
     for (const qa of fixture.qa) {
       if (calls >= MAX_CALLS) break outer;
@@ -528,8 +680,11 @@ for (const fixture of all) {
         // Repeat 0 keeps the plain key, so earlier single-sample runs are reused as-is.
         const parts = [MODEL, variant, fixture.name, qa.q, dataUri];
         if (repeat > 0) parts.push("r" + repeat);
+        if (spec.read) parts.push("read" + READ_ROUNDS + READ_ACCOUNTING);
         const hash = createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 24);
-        const out = await ask(key, cache, hash, dataUri, prompt);
+        const out = spec.read
+          ? await askRead(key, cache, hash, dataUri, prompt, text)
+          : await ask(key, cache, hash, dataUri, prompt);
         if (!out.error) calls += 1;
         const usd = usdFor(out.promptTokens, "cacheMiss", MODEL);
         results.push({
@@ -539,7 +694,21 @@ for (const fixture of all) {
           finish: out.finish ?? "",
           drawn: framed.w + "x" + framed.h, sent: preview.width + "x" + preview.height,
           carried, estTok, measured: out.promptTokens ?? null, usd: usd ?? null,
-          textUsd: usdFor(textTok, "cacheMiss", MODEL), cached: out.cached === true
+          textUsd: usdFor(textTok, "cacheMiss", MODEL), cached: out.cached === true,
+          // Re-read arms only: which lines were asked for, how many rounds it took, and the
+          // share of the bill that is the ingress sent again — a context-cache hit, 50x cheaper.
+          reads: out.reads ?? null, rounds: out.rounds ?? 0,
+          firstTok: out.firstTok ?? null, extraTok: out.extraTok ?? 0,
+          hitTok: out.hitTok ?? null, missTok: out.missTok ?? null,
+          extraHitTok: out.extraHitTok ?? null, extraMissTok: out.extraMissTok ?? null,
+          // The honest bill: the provider's own cache split, when it reports one.
+          trueUsd: spec.read && out.missTok != null
+            ? usdFor(out.missTok, "cacheMiss", MODEL) + usdFor(out.hitTok, "cacheHit", MODEL)
+            : undefined,
+          // What the extra rounds alone cost, which is the price of the re-read decision.
+          extraUsd: spec.read && out.extraTok
+            ? usdFor(out.extraMissTok ?? out.extraTok, "cacheMiss", MODEL) + usdFor(out.extraHitTok ?? 0, "cacheHit", MODEL)
+            : 0
         });
       }
       if (calls >= MAX_CALLS) break outer;
@@ -547,14 +716,18 @@ for (const fixture of all) {
   }
 }
 
-writeFileSync(CACHE_PATH, JSON.stringify(cache, null, 1));
-// Raw rows for the run, so a later analysis can split by repeat, fixture or question
-// kind without re-asking (the console table only aggregates).
-writeFileSync(join(here, ".cache", "last-results.json"), JSON.stringify(results));
+// A --dump pass asks nothing, so it must not overwrite the evidence a paid run left
+// behind: an empty results file and an empty report are not a record of anything.
+if (!DUMP) {
+  writeFileSync(CACHE_PATH, JSON.stringify(cache, null, 1));
+  // Raw rows for the run, so a later analysis can split by repeat, fixture or question
+  // kind without re-asking (the console table only aggregates).
+  writeFileSync(RESULTS_PATH, JSON.stringify(results));
+}
 
 const byVariant = new Map();
 for (const r of results) {
-  const row = byVariant.get(r.variant) ?? { variant: r.variant, n: 0, correct: 0, cached: 0, measuredSum: 0, measuredN: 0, usd: 0, est: 0, drawn: r.drawn, sent: r.sent, carried: r.carried, textUsd: r.textUsd, truncated: 0, kinds: {} };
+  const row = byVariant.get(r.variant) ?? { variant: r.variant, n: 0, correct: 0, cached: 0, measuredSum: 0, measuredN: 0, usd: 0, est: 0, drawn: r.drawn, sent: r.sent, carried: r.carried, textUsd: r.textUsd, truncated: 0, readsN: 0, askedN: 0, extraUsd: 0, kinds: {} };
   row.n += 1;
   if (r.finish === "length") row.truncated += 1;
   const bucket = row.kinds[r.kind] ?? (row.kinds[r.kind] = { n: 0, correct: 0 });
@@ -563,6 +736,8 @@ for (const r of results) {
   if (r.correct) row.correct += 1;
   if (r.cached) row.cached += 1;
   if (r.measured) { row.measuredSum += r.measured; row.measuredN += 1; }
+  if (r.reads && r.reads.length) { row.readsN += r.reads.length; row.askedN += 1; }
+  row.extraUsd += r.extraUsd ?? 0;
   row.usd += r.usd ?? 0;
   row.est = r.estTok;
   byVariant.set(r.variant, row);
@@ -582,6 +757,9 @@ console.table([...byVariant.values()].map((r) => ({
   "$/answer": formatUsd(r.usd / r.n),
   "$/correct": r.correct ? formatUsd(r.usd / r.correct) : "-",
   "raw text $/answer": formatUsd(r.textUsd),
+  "asked to re-read": r.askedN ? Math.round((100 * r.askedN) / r.n) + "%" : "-",
+  "reads/answer": r.readsN ? (r.readsN / r.n).toFixed(2) : "-",
+  "extra $/answer": r.readsN ? formatUsd(r.extraUsd / r.n) : "-",
   truncated: r.truncated
 })));
 
@@ -610,5 +788,7 @@ if (wrong.length) {
   for (const r of wrong) md.push("- \`" + r.variant + "\` " + r.fixture + " — " + r.qa + " → expected \`" + r.expected + "\`, got \`" + String(r.answer).replace(/\n/g, " ").slice(0, 120) + "\`");
   md.push("");
 }
-writeFileSync(REPORT_PATH, md.join("\n"));
-console.log("report: " + REPORT_PATH);
+if (!DUMP) {
+  writeFileSync(REPORT_PATH, md.join("\n"));
+  console.log("report: " + REPORT_PATH);
+}

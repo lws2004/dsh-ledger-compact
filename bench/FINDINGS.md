@@ -38,6 +38,8 @@ is cached; results live in `bench/report.md`, raw usage included.
 | **Prefix totals** (`lines 1-10`, `lines 1-20`, +39 tokens) | paired 6-repeat, 168 questions per arm: 142 vs 141, net +1, p=1.00 — but "cases 0-19 PASS count" 0/6 → 6/6 and a role-colliding cjk count 6/6 → 1/6 | **rejected** — token counts are role-blind, and a plausible wrong number is worse than none |
 | **Compression ratio as the axis to trade on** (`bench/miss-audit.mjs`, the recorded run re-read at no model cost) | the frame is a fixed bill (~434 tokens) plus a 24-line excerpt, so it does not grow with the file: 6.4x the same content as text for 3001 short lines, 26x for 2000 long ones, **15.5x per correct answer** | **not a trade** — the ratio is set by the input, not by a knob, and every accuracy gain measured came from text, none from pixels |
 | **Trading a silent error for a caught one** (same audit) | 53 misses of 336: **52 are well-formed and plausible**, 47 are values that occur verbatim in the file asked about, 51 have the same digit width as the truth; **1** refutes itself | **new axis, and the binding one** — `$/correct` scores a silent confabulation the same as a caught one; a caller cannot |
+| **Offering the read the notice promises** (arms that declare `read: true`; paired 3-repeat, 84 answers each, control in the same run) | 66–69/84 against the frozen control's 71/84 (nets −5, −2, −5; p=0.38, 0.79, 0.33) for 41–83% more tokens — but **17 of 18 aimed reads were right**, and the 7-digit-id wall goes 0/3 → 2/3 | **rejected** — the mechanism is real and worth keeping reachable; the reads also land on the counting class, where a window is worse than the digest, and that costs more than it returns |
+| **Naming the coordinates** (one notice line, ~30 tokens: the gutter labels are source line numbers and `read_result(offset=N)` returns those bytes) | ask rate **8% → 29%**, aimed reads 6 → 18, value +1 of 57, structure 22/27 → 19/27 | **rejected** — it makes the re-read decision cheap, which is not what was missing; coverage is, and it cannot be selective from the ingress |
 
 Colour is not removed from the library: `encodePngPalette` and the per-cell /
 per-digit ink options stay, tested and ready, should a future model show a gain.
@@ -357,6 +359,78 @@ showed the plugin must not guess. So detectability has the same ceiling as mecha
 and the honest place to raise it is the caller: the re-read contract, whose errors are the
 source's own.
 
+## The re-read works; nothing cheap makes the model take it
+
+The notice has always said "re-read with offset/limit" and the frame's gutter has always
+printed source line numbers — but the bench had no read tool, so it only ever measured what
+the model could do with a frozen ingress. Arms that declare `read: true` hand it the read the
+contract promises (`read_result(offset, limit)` over the same source) and record what it does
+with it. Paired 3-repeat, 84 answers per arm against the frozen control in the same run:
+
+| arm | correct | value | structure | tok/answer | $/answer | asked to read |
+| --- | --- | --- | --- | --- | --- | --- |
+| `excerpt-digest` — frozen control, what ships | **71/84** | 49/57 | **22/27** | 1097 | $0.000329 | — |
+| `reread-base` — same notice, the read simply available | 66/84 | 49/57 | 17/27 | 1549 | $0.000465 | **8%** |
+| `reread-address` — + one line naming the coordinates | 69/84 | 50/57 | 19/27 | 2008 | $0.000602 | **29%** |
+| `reread-hint` — + the trust hint that was neutral while it had nothing to act on | 66/84 | 45/57 | 21/27 | 1690 | $0.000507 | 13% |
+
+No arm beats the control. The paired nets are −5, −2 and −5 (sign test p=0.38, 0.79, 0.33), so
+this is less a measured loss than a measured absence of gain — bought with 41–83% more tokens.
+
+**The reads themselves are good.** Of the answers that asked, 67–75% aimed a read at a line
+that really holds the expected value, and **17 of those 18 aimed reads were right** — across
+every fixture, and including the classes that are a wall from the image alone:
+
+- the 7-digit id on the row whose user is u30: **0/3** frozen, **2/3** with the address line;
+- the qty on the row whose user is u17: 2/3 frozen → **3/3** with it;
+- the byte count at the end of the `items/5` line, and the test-log timings: right whenever asked.
+
+So the mechanism the plugin was designed around is real, and the wall is breakable. What does
+not work is getting the read taken often enough, and on the questions where it helps.
+
+### Cheap is not the constraint
+
+`reread-address` adds one line to the notice — "every row of the image is labelled with its
+source line number; `read_result(offset=<that number>)` returns those exact bytes" — for about
+30 tokens. It triples the ask rate (8% → 29%) and triples the aimed reads (6 → 18 against
+`reread-base`'s 3). Making the decision cheap works exactly as intended, and it is not what
+was missing.
+
+The arm's value accuracy moves by **+1 of 57** while its structure accuracy falls 22/27 →
+19/27, because the extra asking is not selective: it also puts reads in front of the counting
+questions, where a window of text is worse than the whole-file digest. "How many of these four
+rows have qty above 100" is the clean case — frozen it is 1/3, and with the address line it is
+**0/3 while asking to read on all three**, answering `2`, `4`, `4` where the answer is `3`.
+
+That is the prefix-totals failure one level up: the plugin cannot tell a counting question from
+a transcription question because it never sees the question, so prompting for a read raises the
+rate everywhere, including where reading hurts. Of the 64 misses in this run, **42 were answered
+without asking to read once.**
+
+### What a re-read actually costs
+
+The provider reports its own cache split, and **75–85% of the prompt tokens in a read
+conversation come back as cache hits**: the image, the excerpt and the question are a prefix the
+previous round already paid for. Measured per answer across the arm, the extra rounds add
+**$0.000007–$0.000029** to a $0.000329 answer — 2–9%, not the 41–83% the all-miss convention in
+the table above charges. A re-read is cheap. It is just not useful here.
+
+## The scorer had three silent escaping bugs
+
+`fidelity-bench.mjs` decided every verdict with an inline matcher that carried a doubled
+backslash inside three regex literals. `normalize` stripped `\s` instead of whitespace; the
+number-prefix branch tested for a literal `\d` and was dead; the 5xx retry never fired on a 5xx.
+The first made the matcher lax, the other two made it strict — `matches("52", "52ms")` was false,
+so a correct bare number against a number+unit expectation scored wrong.
+
+Re-deciding all 336 stored answers of the 0.13.2 run changes **no verdict**: the model answered
+`52ms` where the expectation was `52ms`, so the dead branch never bit. The bugs were real and the
+numbers survived them by luck.
+
+They are fixed, and the matcher now lives in `bench/match.mjs` shared with `miss-audit.mjs`,
+which recomputes every verdict instead of trusting the stored flag. A scoring bug that flatters
+every arm at once is exactly what the audit exists to catch.
+
 ## Rule for the next change
 
 Ship a layout change only when it beats the control by more than the noise floor on a
@@ -366,3 +440,8 @@ capacity and risk — as the ruler was.
 And score detectability alongside accuracy before shipping either: never trade an error a
 caller can catch for one they cannot, at equal accuracy. `node bench/miss-audit.mjs` reports
 both from the recorded run, for free.
+
+And test the contract, not just the frame. The re-read axis looked settled for three versions
+because every arm measured a frozen ingress; the moment the read existed, one line of notice
+tripled the rate and the hard-value wall fell from 0/3 to 2/3 in the same run. Run the arms
+that declare `read: true` before concluding anything about what the notice promises.

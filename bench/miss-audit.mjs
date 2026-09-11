@@ -20,13 +20,17 @@
  *   node bench/miss-audit.mjs --variant excerpt-blocks
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fixtures } from "./fixtures.mjs";
+import { matches } from "./match.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const RESULTS = join(here, ".cache", "last-results.json");
+/** The tracked record; the working copy under .cache is only a fallback for old runs. */
+const RESULTS = existsSync(join(here, "results.json"))
+  ? join(here, "results.json")
+  : join(here, ".cache", "last-results.json");
 
 const argv = process.argv.slice(2);
 const flag = (name, fallback) => {
@@ -38,6 +42,22 @@ const flag = (name, fallback) => {
 const sources = new Map(fixtures().map((f) => [f.name, f.lines.join("\n")]));
 
 const rows = JSON.parse(readFileSync(RESULTS, "utf8"));
+
+// Re-decide every verdict instead of trusting the stored flag. The bench's own matcher
+// carried three silent escaping bugs (`miss-audit.mjs` names them in match.mjs), and a
+// scoring bug that flatters every arm at once is exactly what this tool exists to catch.
+let corrected = 0;
+let correctedUp = 0;
+for (const r of rows) {
+  const verdict = !r.error && matches(r.answer, r.expected);
+  if (verdict !== r.correct) {
+    corrected += 1;
+    if (verdict) correctedUp += 1;
+  }
+  r.stored = r.correct;
+  r.correct = verdict;
+}
+
 const only = flag("--variant", null);
 const run = only ? rows.filter((r) => r.variant === only) : rows;
 if (run.length === 0) throw new Error("no results for " + (only ?? "any variant"));
@@ -51,6 +71,13 @@ const bare = (s) => /^\s*-?\d+\s*$/.test(String(s));
 const variants = [...new Set(run.map((r) => r.variant))];
 
 console.log("# Miss audit — " + RESULTS.replace(here + "/", "") + "\n");
+if (corrected > 0) {
+  console.log(
+    "**" + corrected + " of " + rows.length + " stored verdicts were wrong** (" + correctedUp +
+    " scored wrong that were right, " + (corrected - correctedUp) + " the other way); the table below " +
+    "recomputes every one with \`bench/match.mjs\`.\n"
+  );
+}
 
 console.log("## What the scoreboard already says\n");
 console.log("| variant | n | correct | value | structure | tok/answer | $/answer | $/correct | text $/correct | advantage |");
@@ -124,3 +151,62 @@ console.log("```\n");
 console.log("| fixture | misses | of those, a real value from the file | same width as the truth |");
 console.log("| --- | --- | --- | --- |");
 for (const [f, b] of perFixture) console.log(`| \`${f}\` | ${b.n} | ${b.present} | ${b.width} |`);
+
+// ---------------------------------------------------------------- did it go and look?
+
+/**
+ * The re-read arms answer a question the scoreboard cannot: given a read it was promised but
+ * never told how to aim, does the model take it, does it aim at the answer, and does the read
+ * pay for itself? "Aimed" means a read whose line range covers a source line that really
+ * holds the expected value; a value that occurs on more than five lines (`3`, `19`) cannot
+ * be aimed at, so those questions are counted as asked but left out of the aim column.
+ */
+const readArms = variants.filter((v) => run.some((r) => r.variant === v && Array.isArray(r.reads)));
+if (readArms.length > 0) {
+  const places = (fixture, expected) => {
+    const src = sources.get(fixture);
+    if (!src) return null;
+    const want = String(expected);
+    // A bare number is matched on digit boundaries, or "221" would claim every line holding
+    // an id that happens to contain 221. Anything else is matched literally.
+    const re = /^\d+$/.test(want) ? new RegExp("(^|[^0-9])" + want + "($|[^0-9])") : null;
+    const hits = [];
+    const lines = src.split("\n");
+    for (let i = 0; i < lines.length; i++) if (re ? re.test(lines[i]) : lines[i].includes(want)) hits.push(i + 1);
+    return hits.length > 0 && hits.length <= 5 ? hits : null;
+  };
+  console.log("\n## Did it go and look?\n");
+  console.log("| variant | asked to read | reads/answer | aimed at the answer | right when aimed | right when not asked | extra $/answer |");
+  console.log("| --- | --- | --- | --- | --- | --- | --- |");
+  for (const v of readArms) {
+    const R = run.filter((r) => r.variant === v);
+    const asked = R.filter((r) => (r.reads ?? []).length > 0);
+    const plain = R.filter((r) => (r.reads ?? []).length === 0);
+    let aimable = 0;
+    let aimed = 0;
+    let aimedRight = 0;
+    for (const r of asked) {
+      const where = places(r.fixture, r.expected);
+      if (!where) continue;
+      aimable += 1;
+      if ((r.reads ?? []).some((rd) => rd.offset <= where[where.length - 1] && rd.offset + rd.limit - 1 >= where[0])) {
+        aimed += 1;
+        if (r.correct) aimedRight += 1;
+      }
+    }
+    const reads = R.reduce((s, r) => s + (r.reads ?? []).length, 0);
+    const extra = R.reduce((s, r) => s + (r.extraUsd ?? 0), 0);
+    console.log(
+      `| \`${v}\` | ${pct(asked.length, R.length)} | ${(reads / R.length).toFixed(2)} | ` +
+      `${aimable ? pct(aimed, aimable) + " (" + aimed + "/" + aimable + ")" : "-"} | ` +
+      `${aimed ? pct(aimedRight, aimed) + " (" + aimedRight + "/" + aimed + ")" : "-"} | ` +
+      `${pct(plain.filter((r) => r.correct).length, plain.length)} | ` +
+      `${usd(extra / R.length)} |`,
+    );
+  }
+  const silentUnread = misses.filter((r) => Array.isArray(r.reads) && r.reads.length === 0).length;
+  console.log(
+    `\nOf the ${misses.length} misses in this run, **${silentUnread} were answered without asking to read once**.`,
+  );
+}
+

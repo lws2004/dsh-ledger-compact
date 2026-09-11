@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.13.3
+
+The re-read contract the plugin has always advertised — "re-read with offset/limit", with the
+frame's gutter printing source line numbers — had never been tested, because the bench had no
+read tool. It does now. No `lib/` change.
+
+### Added
+
+- **`read: true` arms** in `bench/fidelity-bench.mjs`: the model gets `read_result(offset, limit)`
+  over the same source, and the run records how often it asks, which lines it asks for, how many
+  rounds it takes, and the provider's own cache split for the repeats.
+- **`bench/match.mjs`**: the right-or-wrong matcher, shared by the bench and the audit.
+  `miss-audit.mjs` now **recomputes every verdict** from the stored answers instead of trusting
+  the stored flag, and reports how many it corrected.
+- **`bench/results.json`**: the raw rows of the last paid run, tracked. The call cache is
+  gitignored and costs money to reproduce, so this is the only copy of the answers that survives
+  a clone. A `--dump` pass no longer overwrites the results or the report (it used to wipe both).
+
+### Measured
+
+- **The reads work and nothing cheap makes the model take them.** Paired 3-repeat, 84 answers
+  per arm against the frozen control (71/84): the same notice with a read available 66/84
+  (asked on 8% of answers), plus one line naming the coordinates 69/84 (**asked on 29%**), plus
+  the trust hint 66/84. Nets −5, −2, −5 (p=0.38, 0.79, 0.33) for 41–83% more tokens.
+- **17 of 18 aimed reads were right**, across every fixture: the 7-digit id on the row whose
+  user is u30 goes **0/3 frozen → 2/3** with the address line, the u17 qty 2/3 → 3/3, and the
+  byte counts and timings are right whenever asked. The wall is breakable; the arm still loses,
+  because the extra asking also puts reads in front of the counting questions, where a window of
+  text is worse than the whole-file digest ("four rows with qty above 100": 1/3 frozen, **0/3
+  while asking on all three**).
+- **A re-read costs 2–9%, not 41–83%.** 75–85% of the prompt tokens in a read conversation come
+  back as cache hits, so the re-sent image and excerpt are not paid for twice; the all-miss
+  convention in the table is an upper bound.
+- **The scorer had three silent escaping bugs** (a doubled backslash in three regex literals: the
+  whitespace strip never fired, the number-prefix branch was dead, the 5xx retry never retried on
+  a 5xx). Re-deciding all 336 stored answers of the 0.13.2 run changes **no verdict** — the model
+  happened to answer `52ms` where the expectation was `52ms`. Fixed and extracted anyway.
+
+### Unchanged
+
+- `lib/` is untouched. Every rendering and notice decision measured above is the shipped one.
+
 ## 0.13.2
 
 Two questions the scoreboard could not answer, both settled from the recorded run — no
