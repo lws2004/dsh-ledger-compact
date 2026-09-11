@@ -139,6 +139,9 @@ Two things below are measured, not assumed:
 - **Do not raise the request-image budget**: `llm-deepseek`'s `imagePixelBudget` (640000 by default) is configurable, but 1.3M measured the same accuracy at twice the money and 2.1M collapsed to 33%. The plugin's 传图像素预算 setting only needs to follow the deployment's value — and must, if it is set to `"low"`, or every frame gets resized into the 1–2/10 failure mode.
 - **Ceiling**: about a quarter of exact-value questions are still misread in the best configuration. The image is an index, not a notary — exact bytes travel as text, in the fold card, or through `offset/limit` re-reads.
 
+- **There is no compression ratio to trade**: the frame is a fixed ~434-token bill and the excerpt is capped at 16 head + 8 tail lines, so the request does not grow with the file — `frame + 24 lines + the answer`, against *every* line as text. That measures **15.5x cheaper per correct answer** overall, from 6.0x (3001 four-character lines) to 25.4x (2000 hundred-byte lines): the ratio is a property of the input, not a dial. Every accuracy gain measured so far came from text — the excerpt (+21 points of value) and the digest (+43 points of structure) — and no pixel-side change moved accuracy above the legibility floor.
+- **The misses are a confabulation channel, not a noise channel** (`bench/miss-audit.mjs`, no model calls): of 53 wrong answers in 336, **52 are well-formed and plausible** — 47 are values that occur verbatim in the file asked about and 51 have the same digit width as the truth (`1001110` → `1001147`, `261` → `$268`, `29` → `42`). Exactly one refutes itself with a shape or range check. A lossy codec garbles and announces it; this channel substitutes a real value and leaves no signal, so `$/correct` prices a wrong answer here below what it costs.
+
 ## Fold card
 
 Mechanical, no model. Prior fold text is never nested, but it is not lost either: files, intents and errors recovered from an earlier `[Snapcompact]` card are carried forward into the new one (files only fill capacity the new span left over).
@@ -185,6 +188,9 @@ node bench/layout-bench.mjs
 
 # fidelity + real billing: fixtures x layout variants x checkable questions, cached in bench/.cache
 node bench/fidelity-bench.mjs
+
+# what the misses are and what the money buys: re-reads the recorded run, no model calls
+node bench/miss-audit.mjs
 
 # one test binds a real dsh-session; point it at the installed package to run it
 DSH_SESSION_MODULE="$DSH/node_modules/@deepseek-ai/dsh-session/lib/index.js" \

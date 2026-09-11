@@ -36,6 +36,8 @@ is cached; results live in `bench/report.md`, raw usage included.
 | **The head/tail excerpt beside the image** (what the plugin actually sends; the bench had only ever measured the image alone) | paired 3-repeat, 75 questions per arm: value accuracy 70% → **91%** (net +12/57, p=0.002), 447 → 1000 tokens | **confirmed and shipped** — it rescues exactly the questions the image cannot answer, and a wider window adds nothing |
 | **Mechanical whole-file token totals in the notice** (`tokenDigest`, +50 tokens) | paired 6-repeat, 168 questions per arm: structure accuracy 35% → **78%** (net +23/54, p<0.0001), value unchanged (−1/114, p=1.00) | **shipped** — counting a file is free in text and impossible in a picture |
 | **Prefix totals** (`lines 1-10`, `lines 1-20`, +39 tokens) | paired 6-repeat, 168 questions per arm: 142 vs 141, net +1, p=1.00 — but "cases 0-19 PASS count" 0/6 → 6/6 and a role-colliding cjk count 6/6 → 1/6 | **rejected** — token counts are role-blind, and a plausible wrong number is worse than none |
+| **Compression ratio as the axis to trade on** (`bench/miss-audit.mjs`, the recorded run re-read at no model cost) | the frame is a fixed bill (~434 tokens) plus a 24-line excerpt, so it does not grow with the file: 6.4x the same content as text for 3001 short lines, 26x for 2000 long ones, **15.5x per correct answer** | **not a trade** — the ratio is set by the input, not by a knob, and every accuracy gain measured came from text, none from pixels |
+| **Trading a silent error for a caught one** (same audit) | 53 misses of 336: **52 are well-formed and plausible**, 47 are values that occur verbatim in the file asked about, 51 have the same digit width as the truth; **1** refutes itself | **new axis, and the binding one** — `$/correct` scores a silent confabulation the same as a caught one; a caller cannot |
 
 Colour is not removed from the library: `encodePngPalette` and the per-cell /
 per-digit ink options stay, tested and ready, should a future model show a gain.
@@ -292,8 +294,75 @@ answer, and hurts when they are merely plausible. Everything past this point wou
 role-aware counting — per-field positions, per-column values — which is no longer mechanical
 general-purpose text, it is a schema the plugin would have to guess.
 
+## The bill is constant, so there is no ratio to trade
+
+The frame is one 1024x624 image whatever the file weighs, and the excerpt beside it is
+capped at 16 head + 8 tail lines. Nothing else in the request scales. So the plugin's bill
+is `frame + 24 lines + the answer`, and the same content as text is *every* line:
+
+| fixture | source lines | source bytes | $/answer | same text | advantage | $/correct | advantage |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `seq-3000` | 3001 | 13922 | $0.000163 | $0.001044 | 6.4x | $0.000174 | 6.0x |
+| `test-log` | 1500 | 35974 | $0.000236 | $0.002698 | 11.4x | $0.000258 | 10.5x |
+| `id-grid` | 1501 | 56706 | $0.000284 | $0.004253 | 15.0x | $0.000710 | 6.0x |
+| `cjk-log` | 700 | 58475 | $0.000375 | $0.005540 | 14.8x | $0.000410 | 13.5x |
+| `access-log` | 2000 | 190744 | $0.000550 | $0.014306 | 26.0x | $0.000563 | 25.4x |
+
+The ratio rises with the file and the frame does not, so "compression ratio" is a property
+of what arrives, not a dial the plugin turns. The dials it does have are all elsewhere, and
+the measurements put each of them on one side of the legibility knee or the other:
+
+- **Below the knee, compressing costs accuracy.** Half the linear resolution halves the bill
+  and takes value accuracy 14/20 → 9/20. That is the only real point on a ratio/accuracy
+  curve, and it is on the wrong side of the knee.
+- **Above the knee, spending buys nothing.** Doubling the request budget doubled the rows and
+  the bill and left accuracy flat; +56% ink per glyph at identical capacity did the same.
+- **Every accuracy gain measured came from text.** The excerpt (+21.1 points of value, +553
+  tokens), the digest (+43 points of structure, +50 tokens). The pixel side contributed the
+  frame, which bought capacity, and the ruler, which fixed the dominant error class.
+
+The shipped point therefore sits at the knee — the cheapest frame that stays above the
+legibility floor — and spends the rest on text, where returns are still positive. There is
+no accuracy left to buy by compressing less, and nothing to gain by compressing more.
+
+## What the misses are: a confabulation channel, not a noise channel
+
+`bench/miss-audit.mjs` re-reads the recorded run and asks of every miss whether any cheap
+check could have caught it. It costs nothing to run and it changes what the scoreboard means.
+
+Of 336 answers, 53 were wrong. **One** refuted itself — `157` for "how many of the first ten
+requests returned 503" is larger than the ten it counts. The other **52 were well-formed,
+plausible, and wrong**:
+
+```
+wrong value occurs verbatim in the file it was asked about   47 / 53
+wrong value has the same digit width as the truth            51 / 53
+```
+
+`1001110` came back `1001147`. `261` came back `$268`. `221` came back `234`. `29` came back
+`42`. Every one of those is a real value, correctly formatted, from a nearby row — a lossy
+codec garbles and announces itself; this channel substitutes and does not. The caller has no
+signal, and neither does the model: the answer looks exactly like the 141 that were right.
+
+That is the third axis the tradeoff was missing. Compression was being judged on
+`(ratio, accuracy)`, and `$/correct` prices a silent substitution the same as a caught one.
+A caller cannot. What matters is `(ratio, accuracy, detectability)`, and the shipped profile
+is strong on the first, decent on the second, and near-zero on the third — and the third is
+the one that decides whether a wrong answer costs one question or a downstream action.
+
+The plugin can only make an error self-refuting where it computes the truth itself. The
+whole-file digest is exactly that, which is why the single detectable miss is a count. Past
+that boundary lies per-field, per-column counting — the schema the prefix-totals experiment
+showed the plugin must not guess. So detectability has the same ceiling as mechanical text,
+and the honest place to raise it is the caller: the re-read contract, whose errors are the
+source's own.
+
 ## Rule for the next change
 
 Ship a layout change only when it beats the control by more than the noise floor on a
 paired run (`--repeats 3`, both variants in the same run), or when it is free in tokens,
 capacity and risk — as the ruler was.
+
+And score detectability alongside accuracy before shipping either: never trade an error a
+caller can catch for one they cannot, at equal accuracy. `node bench/miss-audit.mjs` reports
+both from the recorded run, for free.

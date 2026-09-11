@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.13.2
+
+Two questions the scoreboard could not answer, both settled from the recorded run — no
+model calls, no `lib/` change.
+
+### Added
+
+- **`bench/miss-audit.mjs`**: re-reads `.cache/last-results.json` and reports what the
+  misses actually are, plus what the money actually buys. `--variant` audits one arm.
+- The bench fixtures moved to **`bench/fixtures.mjs`** so the audit and the bench rebuild the
+  same five sources from one place. The extraction is byte-identical: all five fixture
+  hashes (name, line count, question count, sha256 of the text) match before and after.
+
+### Measured
+
+- **There is no ratio to trade.** The frame is a fixed ~434-token bill and the excerpt is
+  capped at 24 lines, so the plugin's cost is `frame + 24 lines + the answer` whatever the
+  file weighs, against every line as text: **15.5x cheaper per correct answer** overall, and
+  between 6.0x (`seq-3000`, 3001 four-character lines) and 25.4x (`access-log`, 2000
+  hundred-byte lines) by fixture. The compression ratio is a property of the input, not a
+  dial — and every accuracy gain measured so far came from text, none from pixels.
+- **The misses are a confabulation channel, not a noise channel.** Of 53 wrong answers in
+  336, **52 are well-formed and plausible**: 47 are values that occur verbatim in the file
+  asked about, 51 have the same digit width as the truth (`1001110` → `1001147`, `261` →
+  `$268`, `221` → `234`, `29` → `42`). Exactly one refutes itself with a shape or range
+  check. A lossy codec garbles and announces it; this channel substitutes a real value and
+  leaves no signal — so `$/correct` prices a silent substitution the same as a caught error
+  and a caller cannot.
+
+### Unchanged
+
+- `lib/` is untouched. The rendering path is byte-for-byte the 0.13.1 that the numbers above
+  were measured on; `excerpt-blocks` stays in the bench as the record.
+
 ## 0.13.1
 
 ### Measured
