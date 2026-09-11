@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.13.0
+
+The last coherent failure class was counting — how many FAILs, how many 503s, how many of
+the first ten. A picture cannot count a 2000-line file and neither can an excerpt, but the
+plugin holds the text, so it now counts it and says so.
+
+### Added
+
+- **`tokenDigest`** in `lib/excerpt.js`, wired into both notice paths: the notice now ends
+  with `whole-file totals: PASS×1484 · FAIL×16 · …` — tokens of 16 characters or fewer
+  appearing at least three times anywhere in the result, top eight by count. 50 tokens, no
+  model involved.
+
+### Measured
+
+- **+13.1 points overall, and +42.6 points on structure questions** (paired 6-repeat, 168
+  questions per arm: 119/168 → 141/168, net +22, 95% CI [+6.0, +20.2], p=0.0007) for +50
+  tokens per call. The three whole-file count questions go 0/6 → 6/6 each; exact-value
+  accuracy is unchanged within ±7 points (−1 of 114, p=1.00).
+- A line-numbered excerpt (`excerpt-lines`, so ranges align with the image's ruler) measured
+  neutral (+0 of 84, p=1.00) and did not ship. It stays as a bench arm.
+- The bench's `access-log` fixture now writes four-digit byte counts, so a status code can
+  never be counted twice by a token digest; the whole-file questions about 503s and 200s are
+  therefore exact.
+
 ## 0.12.0
 
 The residual exact-value class was attacked directly, with the six rendering fixes that

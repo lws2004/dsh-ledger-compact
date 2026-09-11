@@ -30,7 +30,7 @@ import { deepseekImageTokens, maxRows, parseAsciiAtlas, previewSize, raster, ras
 import { encodePngGray, encodePngPalette } from "../lib/png.js";
 import { formatUsd, priceFor, requestPreviewSize, usdFor } from "../lib/pricing.js";
 import { estTokensUtf8 } from "../lib/tokens.js";
-import { snapExcerpt } from "../lib/excerpt.js";
+import { SNAP_HEAD_LINES, SNAP_TAIL_LINES, snapExcerpt } from "../lib/excerpt.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const CACHE_PATH = join(here, ".cache", "fidelity.json");
@@ -92,13 +92,19 @@ function fixtures() {
     name: "access-log",
     lines: Array.from({ length: 2000 }, (_, i) =>
       "10.0." + (i % 256) + "." + ((i * 7) % 256) + ' - - [10/Sep/2026:19:00:00 +0800] "GET /api/v1/items/' + i +
-      "?page=" + (i % 50) + ' HTTP/1.1" ' + (i % 37 === 0 ? 503 : 200) + " " + (100 + (i % 900))),
+      // Byte counts are four digits so a status code can never be counted twice: a token
+      // digest says "503 x N" and the honest answer has to be N.
+      "?page=" + (i % 50) + ' HTTP/1.1" ' + (i % 37 === 0 ? 503 : 200) + " " + (1000 + (i % 900))),
     qa: [
       { kind: "value", q: "What HTTP status does the request for /api/v1/items/37 have?", a: "503" },
       { kind: "value", q: "What is the client IP of the request for /api/v1/items/5?", a: "10.0.5.35" },
       { kind: "value", q: "What HTTP status does the request for /api/v1/items/0 have?", a: "503" },
-      { kind: "value", q: "At the end of the request line for /api/v1/items/5 there is a byte count. What is it?", a: "105" },
-      { kind: "structure", q: "How many of the first ten requests (items/0 through items/9) returned status 503?", a: "1" }
+      { kind: "value", q: "At the end of the request line for /api/v1/items/5 there is a byte count. What is it?", a: String(1000 + (5 % 900)) },
+      { kind: "structure", q: "How many of the first ten requests (items/0 through items/9) returned status 503?", a: "1" },
+      // Whole-file, not a range: nothing that is a picture or an excerpt of this file can
+      // count it, which is the point — text can, for free.
+      { kind: "structure", q: "How many requests in the whole file returned status 503? Answer with a number.", a: String(Array.from({ length: 2000 }, (_, i) => i % 37 === 0).filter(Boolean).length) },
+      { kind: "structure", q: "How many requests in the whole file returned status 200? Answer with a number.", a: String(Array.from({ length: 2000 }, (_, i) => i % 37 !== 0).filter(Boolean).length) }
     ]
   });
 
@@ -110,7 +116,8 @@ function fixtures() {
       { kind: "value", q: "How many milliseconds did case-4 take?", a: "52ms" },
       { kind: "value", q: "How many milliseconds did case-12 take?", a: "156ms" },
       { kind: "value", q: "How many milliseconds did case-10 take?", a: "130ms" },
-      { kind: "structure", q: "Among cases 0 through 19, how many are PASS?", a: "19" }
+      { kind: "structure", q: "Among cases 0 through 19, how many are PASS?", a: "19" },
+      { kind: "structure", q: "How many of the 1500 lines in the whole file are FAIL? Answer with a number.", a: String(Array.from({ length: 1500 }, (_, i) => i % 97 === 11).filter(Boolean).length) }
     ]
   });
 
@@ -314,8 +321,46 @@ function padded(frameW, frameH) {
  * bound on what production sees — and the questions whose answers sit in the first 16
  * or last 8 lines are exactly the ones the image keeps failing.
  */
-function withExcerpt(build, options = undefined) {
-  return (text, lines) => ({ ...build(text, lines), excerpt: snapExcerpt(text, options) });
+function withExcerpt(build, options = undefined, make = null) {
+  const buildExcerpt = make ?? ((text) => snapExcerpt(text, options));
+  return (text, lines) => ({ ...build(text, lines), excerpt: buildExcerpt(text) });
+}
+
+/**
+ * Excerpt lines carry the source line number, the way the image's ruler does, and the
+ * elision marker says which lines it stands for. Without them a range question ("cases 0
+ * through 19") has to be aligned by eye and a truncated head reads as a complete one.
+ */
+function numberedExcerpt(text, options = {}) {
+  const head = options.headLines ?? SNAP_HEAD_LINES;
+  const tail = options.tailLines ?? SNAP_TAIL_LINES;
+  const lines = String(text).split("\n");
+  const numbered = (line, i) => (i + 1) + "| " + line;
+  if (lines.length <= head + tail) return lines.map(numbered).join("\n");
+  const from = head + 1;
+  const to = lines.length - tail;
+  return [
+    ...lines.slice(0, head).map(numbered),
+    "… lines " + from + "-" + to + " elided (" + (to - from + 1) + "); see image …",
+    ...lines.slice(-tail).map((line, i) => numbered(line, lines.length - tail + i))
+  ].join("\n");
+}
+
+/**
+ * Mechanical whole-file totals, counted for free in text: tokens of 16 characters or
+ * fewer that appear at least three times, top eight by count. This is what a "how many
+ * X are in this file" question needs and what neither the image nor an excerpt can give.
+ */
+function tokenDigest(text, top = 8) {
+  const counts = new Map();
+  for (const raw of String(text).split(/\s+/)) {
+    const token = raw.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}%]+$/gu, "");
+    if (!token || token.length > 16) continue;
+    counts.set(token, (counts.get(token) ?? 0) + 1);
+  }
+  const rows = [...counts].filter(([, n]) => n >= 3)
+    .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, top);
+  return rows.length === 0 ? "" : "whole-file totals: " + rows.map(([t, n]) => t + "×" + n).join(" · ");
 }
 
 /** Each variant turns one axis: geometry, layout, prompt legend, ink colour, or budget. */
@@ -347,6 +392,10 @@ const VARIANTS = {
   "excerpt-32": { build: withExcerpt(packed(8, 16, { gutterEvery: 1 }), { headLines: 32 }), legend: false },
   /** Same frame and excerpt, but told which channel to trust for exact values. */
   "excerpt-hint": { build: withExcerpt(packed(8, 16, { gutterEvery: 1 })), legend: false, hint: TRUST_HINT },
+  /** The two text-side fixes for the enumeration class. */
+  "excerpt-lines": { build: withExcerpt(packed(8, 16, { gutterEvery: 1 }), {}, (text) => numberedExcerpt(text)), legend: false },
+  /** Shipped in 0.13.0: the notice carries the whole-file totals. */
+  "excerpt-digest": { build: withExcerpt(packed(8, 16, { gutterEvery: 1 }), {}, (text) => snapExcerpt(text) + "\n" + tokenDigest(text)), legend: false },
   "zebra": { build: zebra(8, 16, { gutterEvery: 1 }), legend: false },
   "digit-bold": { build: digitVariant("xorg-8x13-bold-digits.bin", 8, 16, { gutterEvery: 1 }), legend: false },
   /** Both free arms at once: the ship candidate if either mechanism is real. */

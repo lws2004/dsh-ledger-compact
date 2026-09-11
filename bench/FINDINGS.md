@@ -34,6 +34,7 @@ is cached; results live in `bench/report.md`, raw usage included.
 | **A larger glyph** (X.org 8x16 in the *same* 8x16 cell: +56% ink per character, same 39 rows and token bill) | screening 17/20 vs 14/20, then paired 3-repeat 60 samples per variant: **46/60 vs 46/60** | **rejected** — above the legibility floor, pixels buy capacity, not accuracy |
 | **Seven fixes for the residual exact-value class** (row shading, bolder digits, bigger digit box, whitespace grouping, comma grouping, a deeper excerpt window, a trust hint in the prompt) | seven paired runs, 75–150 samples per arm | **rejected** — nothing beat the noise floor; digit grouping was measurably worse |
 | **The head/tail excerpt beside the image** (what the plugin actually sends; the bench had only ever measured the image alone) | paired 3-repeat, 75 questions per arm: value accuracy 70% → **91%** (net +12/57, p=0.002), 447 → 1000 tokens | **confirmed and shipped** — it rescues exactly the questions the image cannot answer, and a wider window adds nothing |
+| **Mechanical whole-file token totals in the notice** (`tokenDigest`, +50 tokens) | paired 6-repeat, 168 questions per arm: structure accuracy 35% → **78%** (net +23/54, p<0.0001), value unchanged (−1/114, p=1.00) | **shipped** — counting a file is free in text and impossible in a picture |
 
 Colour is not removed from the library: `encodePngPalette` and the per-cell /
 per-digit ink options stay, tested and ready, should a future model show a gain.
@@ -229,6 +230,36 @@ is 0/6 with the excerpt too.
 stays, and a question whose answer is a 5+ digit value or the tail field of a dense line
 belongs in text — which is what the notice, the fold card and the `offset/limit` re-read
 contract already do.
+
+## The enumeration class: count it in text, for free
+
+What survived every rendering fix was the counting: "among cases 0 through 19, how many are
+PASS" (2/6 at best), "how many of the first ten requests returned 503" (3/6), and the
+questions about the file as a whole, which nothing shaped like a picture can answer at all.
+
+A frame cannot count 2000 lines and neither can an excerpt, but the plugin holds the whole
+text and counting it is free. `tokenDigest` puts one line in the notice:
+
+    whole-file totals: 0800×2000 · GET×2000 · HTTP/1.1×2000 · 200×1945 · 503×55 · …
+
+Tokens of 16 characters or fewer appearing at least three times anywhere in the result, top
+eight by count — 50 tokens, no model involved.
+
+| configuration | all (n=168) | value (n=114) | structure (n=54) | measured tokens |
+| --- | --- | --- | --- | --- |
+| image + excerpt | 119/168 (71%) | 100/114 (88%) | 19/54 (35%) | 1047 |
+| **image + excerpt + digest** | **141/168 (84%)** | 99/114 (87%) | **42/54 (78%)** | 1097 |
+
+Paired: **+22 of 168, +13.1 points, 95% CI [+6.0, +20.2], p=0.0007**, at +50 tokens. The
+three whole-file questions ("how many 503s", "how many 200s", "how many FAILs") go 0/6 →
+6/6 each — that is the mechanism, not a sampling result: the answer is in the line. The cjk
+range question ("of the first ten batches, how many have queue left 0") also goes 0/6 → 6/6
+*without* the digest containing that count; unexplained, and reported as measured.
+
+Two questions lose two samples each (a 7-digit id, and the cases 0–19 count), which is what
+the value-class interval is for: **it excludes a value-accuracy loss larger than 7 points**.
+The line-numbered excerpt (`excerpt-lines`) measured neutral (+0 of 84, p=1.00) and did not
+ship.
 
 ## Rule for the next change
 
