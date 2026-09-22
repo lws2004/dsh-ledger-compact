@@ -64,6 +64,7 @@ Open **Settings → 快速压缩**. Changes write through to the Host document i
 | Allow dense PNG (`snapImages`) | off | Attach a bitmap only when the main model lists `image` in `inputModalities` **and** the image is cheaper than the original |
 | Confirm before fold (`confirmFold`) | on | Bolt requires a second click |
 | Replace default compact (`replaceDefault`) | **off** | `/compact`, automatic pressure compaction, and overflow recovery use the mechanical summarizer |
+| Verdict fold (`decideFold`) | **off** | Ask typed-decide which results the card must carry verbatim. Unreachable, slow, or low-margin answers all fall back to the mechanical card |
 | Ingress threshold (`minSnapTokens`) | `3000` | Approximate tokens before an excerpt (or PNG) is considered. Range 200–200000 |
 | PNG savings (`savingsRatio`) | `0.85` | Excerpt + estimated image tokens must be ≤ this fraction of the original |
 

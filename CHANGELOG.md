@@ -1,5 +1,76 @@
 # Changelog
 
+## 0.14.0
+
+The verdict fold. typed-decide is asked which of a span's tool results a card must carry
+verbatim, and the ones it calls still-needed-and-not-reproducible get their body back.
+Off by default, and the first landing deliberately moves nothing else: every failure path
+returns the card this plugin already shipped.
+
+### Added
+
+- **`decideFold`** (`lib/decide-fold.js`), a settings switch that is `false` out of the box.
+  Two `noul` questions are asked in one `POST /v1/decide/batch` call per candidate — *still
+  needed*, and *could this be obtained again by re-running the same call* — and the quadrant
+  decides the treatment: not-needed + reproducible is the only `drop`, still-needed +
+  not-reproducible is the only `keep`, and everything else keeps the mechanical treatment.
+- **Evidence the decider cannot derive on its own**: `laterContextOf` scans the span for a
+  later step touching the same target, and states whether it read the target again or rewrote
+  it. Without it the decider only guesses; with it, "superseded" is a fact about the span —
+  worded neutrally, because a leading sentence gets answered as if it were the question.
+- **`bench/fold-live-scan.mjs`**: replays a real `session.jsonl.zstd` through this plugin's own
+  `inspectMessages`, then decides the largest candidates for real. It answers what the
+  hand-built span on `bench/decide-span-bench.mjs` cannot: how much decidable surface a live
+  session actually has.
+- **A `CARRIED DETAIL` section** in the fold card, holding the restored bodies, and a
+  `verdict fold` row plus a `verdictFold` object in the `rawOutput` report — so the
+  trajectory tab's compaction cell shows which span this pass decided about.
+
+### Measured
+
+- **The ingress is the wrong layer for this, and the code says so.** `shapeIngress` may only
+  rewrite the result of the immediately preceding step: an older node already sits in a
+  provider-cached prefix, and rewriting it forces a full re-prefill of everything after it.
+  That window — the result that has just been produced — is exactly where a decider has no
+  discriminating power, because nothing has superseded it yet. A fold rewrites the whole span
+  in one write, so the cache is invalidated either way and the decision is free. This is why
+  the switch is wired to the fold and not to `shapeCurrentTurnIngress`.
+- **On a real 251-result session the decider has no verdict to give.** Replaying
+  `session-540b2b69` (545 messages, 251 tool results, 95 827 tok): 12 results clear the 200-token
+  floor. Asked with the real user request, every margin landed between **0.01 and 0.10** — under
+  the 0.15 gate — so 11 answers were discarded as no-verdict and one became a `drop`. The single
+  superseded access-log result behaved the same way: `needed 0.52 / margin 0.02`. A 0.02 margin
+  must not become a deletion, so `minMargin` routes low-confidence answers to the mechanical
+  treatment, which is the card this plugin already shipped.
+- **The evidence sentence decides the answer.** The first run of that scan told the decider
+  "Nothing in the span refers back to this result" and it dropped **10 of 12**. Reworded
+  neutrally and handed the real user request, the same span dropped **1 of 12**. The decider was
+  answering the hint. A decider fed a leading question is not a measurement — the wording, and a
+  test pinning it, are part of this release.
+- **`Number(null)` is 0**, and the wire shape reports an absent probability as `null`. A test
+  caught the coercion turning "the decider did not answer" into "certainly not needed" — the
+  one direction that deletes context. Absent and unusable values are `null` and are read as no
+  verdict.
+- Cost and latency, measured against the gateway: `GET /v1/decide/health` 33 ms; one two-question
+  batch 907 ms at $0.000037 per question. The pass is off the critical path by default, times out
+  at 4 s overall, and asks about at most 12 results of 200+ tokens, largest first.
+- **Twelve concurrent calls are more than the upstream takes.** The first scan run lost 6 of 12
+  to transient upstream errors; the second lost none, and the ledger cache cut the wall clock from
+  1 172 ms to 595 ms. Every failure path is per-entry and ends in the mechanical treatment, so a
+  throttled decider costs verdicts and never a fold — but the concurrency is still the thing to
+  fix before this is ever switched on.
+
+### Not measured
+
+- Whether the pass pays for itself on a live fold. The span above was scanned offline; no fold
+  has run with the switch on, so the card's real token effect and the latency a manual
+  `/fast-compact` would gain are still unmeasured. Until one has, the switch stays off — and note
+  that with the current evidence the gate rejects nearly every answer, so switching it on would
+  change almost nothing yet.
+- Whether a fold should also drop what the decider calls superseded. The mechanical card already
+  discards every tool body — it keeps one `[tool] name target` line — so there is nothing left
+  for a `drop` to save at this layer.
+
 ## 0.13.4
 
 The one competing design that runs at this plugin's layer is `billion-context`'s `absorb`: hand

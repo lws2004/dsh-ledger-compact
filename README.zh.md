@@ -64,6 +64,7 @@ dsh plugin --profile web add ./dsh-ledger-compact
 | 允许密图 (`snapImages`) | 关 | 仅当主模型 `inputModalities` **明确含 `image`**，且图比原文更省时才贴 PNG |
 | 折页二次确认 (`confirmFold`) | 开 | 输入栏闪电需再点一次 |
 | 替换默认压缩 (`replaceDefault`) | **关** | `/compact`、自动压缩、溢出恢复都走机械摘要 |
+| 判定式折页 (`decideFold`) | **关** | 折页前问 typed-decide 哪些结果必须原样保留；服务不可达、超时或 margin 过低一律退回机械卡 |
 | 入境阈值 (`minSnapTokens`) | `3000` | 大约这么多 token 才摘录或贴图。范围 200–200000 |
 | 密图节省 (`savingsRatio`) | `0.85` | 摘录 + 估图 token 必须 ≤ 原文的这个比例 |
 
