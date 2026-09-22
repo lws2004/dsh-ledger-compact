@@ -55,7 +55,7 @@ The input-bar **bolt** is a context-pressure meter. By default it needs a second
 Open **Settings → 快速压缩**. Changes write through to the Host document immediately. The page is tabbed:
 
 - **入境** — the four shaping settings below.
-- **折页** — fold confirmation, replace-default, and a live preview of the fold card.
+- **折页** — fold confirmation, replace-default, the verdict fold, and a live preview of the fold card.
 - **诊断** — plugin version, the session-event accessor this DSH exposes, ingress counters and the last failure, and how many compaction engines are hooked (plus any engine that would silently fall back to a model call).
 
 | Setting | Default | Meaning |
