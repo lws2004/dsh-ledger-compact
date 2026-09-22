@@ -40,6 +40,13 @@ with no user request no longer spends a verdict pass.
 - **The task line moves the answer 5.3x**: dropped tokens ranged 8562–45618 across four task
   variants of one span.
 - **Given enough evidence the three primitives agree** (top-1 4/4 each) at 24, 4 and 4 requests.
+- **"Use the future to check the past" was falsified.** The attempt to build real-session gold --
+  cut a finished session in half and ask whether the entries judged `drop` were cited afterwards --
+  died on its own control twice. With rarity defined inside the twelve candidates the hit rate was
+  **0.105 against 0.108 for random strings**: the same number, so the "0.58 false-drop lower bound"
+  it produced was an artifact. Whole-corpus rarity does separate (0.017 against 0.106), but of the
+  eight surviving hits half are generic words and the rest are paths -- and "the same file was
+  touched again" is the reason to drop, not evidence of a mistake. See `bench/DECIDE-FINDINGS.md`.
 
 ## 0.14.1
 
