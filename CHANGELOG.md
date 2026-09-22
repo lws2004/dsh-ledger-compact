@@ -54,11 +54,25 @@ returns the card this plugin already shipped.
 - Cost and latency, measured against the gateway: `GET /v1/decide/health` 33 ms; one two-question
   batch 907 ms at $0.000037 per question. The pass is off the critical path by default, times out
   at 4 s overall, and asks about at most 12 results of 200+ tokens, largest first.
-- **Twelve concurrent calls are more than the upstream takes.** The first scan run lost 6 of 12
-  to transient upstream errors; the second lost none, and the ledger cache cut the wall clock from
-  1 172 ms to 595 ms. Every failure path is per-entry and ends in the mechanical treatment, so a
-  throttled decider costs verdicts and never a fold — but the concurrency is still the thing to
-  fix before this is ever switched on.
+- **End to end on a real session, the card is byte-identical — and that is the honest shape of
+  this release.** `bench/fold-live-scan.mjs --fold` now runs the whole path (real decider, real
+  card, real report) over a replayed session: 545 messages, 216 450 discarded tokens, a 49-line
+  card. With the switch on and 12 results decided, the card came back **identical to the
+  mechanical one** — `keep 0` — and the report carried `verdict fold  12 asked · keep 0 ·
+  truncate 0 · drop 1 · mechanical 11` plus a `verdictFold` object for the trajectory tab. The
+  wiring is live and observable; on the evidence so far it is also inert, because at this layer
+  only `keep` can change the card and the gate rejects nearly every answer.
+- **Twelve concurrent calls are more than the upstream takes; four are not.** The first scan lost
+  6 of 12 to transient upstream errors, the end-to-end fold run lost 5 of 12, and a run served
+  entirely from the ledger cache lost none — the loss tracks the upstream, not this code. Wired at
+  12 the switch would have degraded half of every pass. `decideEntries` now runs at most 4 at a
+  time (`concurrency`) and retries a failed call once (`retries`, 300 ms backoff): the same
+  end-to-end fold on a fresh session came back **0 failed of 12** in 2 679 ms. Every failure path
+  is still per-entry and still ends in the mechanical treatment, so a throttled decider costs
+  verdicts and never a fold.
+- **The losing branch of the budget race kept the process alive.** `Promise.race` left the 4 s
+  budget timer armed after the pass had finished; the test suite went from 310 ms to 4 376 ms and
+  that timer was the whole difference. It is cleared in a `finally` now.
 
 ### Not measured
 
