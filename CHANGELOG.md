@@ -4,7 +4,7 @@
 
 Where the compression actually loses information, measured without a model. The fidelity bench
 cannot answer this: `fixtures.mjs` puts every answer inside the first 39 lines on purpose, so it
-can never price a deep line. No `lib/` change.
+can never price a deep line. No `lib/` behaviour change.
 
 ### Added
 
@@ -32,6 +32,22 @@ can never price a deep line. No `lib/` change.
 - The two things that do move coverage are keeping the re-read channel honest (`read` with
   offset/limit, `bash` re-run — what `b742844` fixed) and changing the representation, which is
   what the dense image does.
+
+### Fixed
+
+- **A counter with no reader, and no count.** `hook.js` incremented `HOOK_STATS.verdictFolds`
+  on every verdict pass, but the field was never declared on `HOOK_STATS` and `hookStats()` never
+  exposed it: the value was `NaN` from the first pass, and nothing in the repo read it. A pass's
+  only record is the `verdictFold` object in the fold report; the dead increment is gone.
+
+### Measured
+
+- **The verdict switch's first real fold.** A manual `/fast-compact` over a 317-message span
+  reached the decider with 12 candidates and came back `keep 0 · truncate 0 · drop 4 ·
+  mechanical 8`, `failed 0`, in 2 616 ms — inside the 4 s budget. The card carried no
+  verdict-derived section (`keep` is the only action that can add one, and a `drop` has nothing
+  to save at this layer), while the fold itself went from 26 ms to 2 654 ms. That answers
+  0.14.0's open 'not measured' question: on this evidence the switch buys latency and no card.
 
 ## 0.14.0
 
