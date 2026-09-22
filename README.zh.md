@@ -89,11 +89,16 @@ dsh plugin --profile web add ./dsh-ledger-compact
 默认只出文本：不打图、不调模型。候选只有**当前回合紧邻上一步**的结果；其余已经发送过的节点保持逐字节不变——这正是前缀缓存不被破坏的原因。已经是占位符的结果不会再改。`skill`、`context` 工具结果会跳过。没有 `tokenMeter` 时整段入境跳过，避免只 `replace` 却写不出 `compaction/prune`。
 
 ```
-[Snapcompact: N tokens → excerpt]
+[Snapcompact: N tokens → excerpt · read src/config.ts]
 前 16 行
 … (K lines elided; see image if attached. To inspect or edit exact bytes, re-read with offset/limit) …
 后 8 行
 ```
+
+「可回读」只对**文件读取**成立。命令行输出没有任何 `offset/limit` 入口，省略的中段就是丢了，
+所以对这类结果换一句实话——`These bytes cannot be re-read from here — repeat the call if you
+need the full text`——而不是把模型引向一个到不了的地方。判定规则是白名单：只有 `read` 算可回读，
+未知工具一律按不可回读处理（承诺做不到比少一个便利更贵）。
 
 贴 PNG 必须同时满足：
 
