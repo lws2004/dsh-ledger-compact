@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.14.2
+
+What the verdict decider actually keys on, measured on five benches. One behaviour change: a span
+with no user request no longer spends a verdict pass.
+
+### Changed
+
+- **`foldSummaryDecided` skips the verdict pass when the task is empty.** Measured on three real
+  sessions: handed no task, the decider answered "drop" for all twelve candidates — byte-identical
+  to what it answers when it is handed no task at all. "Still needed to finish the current task"
+  has no referent without a request, so the pass does not run and the card stays mechanical.
+
+### Added
+
+- **Five benches**, each answering one question, all re-runnable: `decide-evidence-bench.mjs`
+  (evidence completeness, page length, margin calibration), `decide-wording-bench.mjs` (wording
+  against fact, with a false-statement control), `decide-later-bench.mjs` (the four shipped
+  later-context sentences), `decide-primitive-bench.mjs` (Noul against Choice and Score),
+  `decide-task-bench.mjs` (how far the task line moves the answer).
+- **`bench/DECIDE-FINDINGS.md`**: the method, the numbers, and the two changes that measurement
+  rejected.
+
+### Measured
+
+- **The quadrant is right; the conjunctive question was wrong.** On the 13 calibration cases:
+  conjunctive 9/13 with 4 dangerous drops, split 9/13 with 1, **quadrant 13/13 safe with 0**
+  (truncate 7, drop 3, keep 3). `decide-calibration.mjs --json` now reports all three ledgers —
+  reading only the conjunctive one turns "the quadrant is entirely safe" into "4 dangerous drops".
+- **Evidence completeness decides the answer.** Same result without a later-context line: accuracy
+  **0.500**, probability pinned at 0.51–0.57, margin 0.01–0.07. Add the line: **1.000**. Page
+  length (200/700/2000) changes nothing.
+- **Wording moves the answer by about 0.32.** One fact, four phrasings, six real files, every file
+  the same direction; a false statement pulls 0.117 to 0.440 and crosses the line in 2 of 6, while
+  margin falls from 0.383 to 0.090. Evidence sentences state facts; they do not argue.
+- **`minMargin = 0.15` is supported** — 31/31 correct above it, 0.882 below. **But margin measures
+  the decider's own confidence, not the clarity of the facts**: an empty task produced the same
+  12/12 answer on all three sessions, with margin 0.12–0.19, higher than some real tasks at 0.075.
+- **The task line moves the answer 5.3x**: dropped tokens ranged 8562–45618 across four task
+  variants of one span.
+- **Given enough evidence the three primitives agree** (top-1 4/4 each) at 24, 4 and 4 requests.
+
 ## 0.14.1
 
 Where the compression actually loses information, measured without a model. The fidelity bench
