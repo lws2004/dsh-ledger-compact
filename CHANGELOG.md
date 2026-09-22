@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.14.0
+
+Where the compression actually loses information, measured without a model. The fidelity bench
+cannot answer this: `fixtures.mjs` puts every answer inside the first 39 lines on purpose, so it
+can never price a deep line. No `lib/` change.
+
+### Added
+
+- **`bench/coverage-audit.mjs`**: five equal-budget arms (`head-tail`, `head-tail+digest`,
+  `signal-first`, `rare-first`, `even-sample`) plus two controls (`all`, `head-extend`), scored by
+  whether each original line survives the compression, banded by position. 200 model-free checks
+  across the five fixtures.
+
+### Measured
+
+- **Coverage is set by the line budget, not by the choosing.** Every selective arm lands at 0–3%
+  in the middle and late bands. The controls say why: `all` scores 100% everywhere (the
+  measurement is right), and **`head-extend` — which is not clever at all, just four more head
+  lines — beats every clever arm in the early band, 67% against 4%.**
+- **The first version of this audit put `rare-first` at 67% in the early band, and it was an
+  artifact.** On homogeneous data every template ties, and ordering ties by index silently
+  degrades that arm into "extended head". Spreading ties with a fixed hash dropped it to 4%,
+  level with blind sampling. The control arm is what caught it.
+- **Signal-first is no rescue either**: `access-log` holds about 54 rows at status 503, so 16 slots
+  buy 2% of the middle band. Sparse signals are not sparse enough.
+- **The ceiling is arithmetic**: 40 kept lines out of 2 000 is 2%, whatever chose them. A decider
+  wired into the ingress can only pick a better 16 lines out of 2 000 — 0.8% — so at this layer
+  its accuracy is not the constraint. This is the measured answer to "should the decider move to
+  ingress shaping": no, and not because it is inaccurate.
+- The two things that do move coverage are keeping the re-read channel honest (`read` with
+  offset/limit, `bash` re-run — what `b742844` fixed) and changing the representation, which is
+  what the dense image does.
+
 ## 0.13.4
 
 The one competing design that runs at this plugin's layer is `billion-context`'s `absorb`: hand
