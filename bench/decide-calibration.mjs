@@ -181,9 +181,22 @@ for (const scenario of SCENARIOS) {
 
 const dangerous = rows.filter((x) => x.dangerous).length;
 const wrong = rows.filter((x) => !x.ok).length;
+const wrongNeeded = rows.filter((x) => !x.ok_needed).length;
+const dangerNeeded = rows.filter((x) => !x.ok_needed && x.verdict_needed === "drop" && x.expect === "keep").length;
+const unsafe = rows.filter((x) => !x.matrixSafe).length;
+const actions = {};
+for (const x of rows) actions[x.matrix] = (actions[x.matrix] ?? 0) + 1;
 
 if (JSON_OUT) {
-  console.log(JSON.stringify({ rows, dangerous, wrong }, null, 2));
+  // 三个口径必须一起给:只报合取式口径,会把「四象限其实全安全」读成「高危误删 4 条」。
+  // 真实代码路径(lib/decide-fold.js 的 verdictAction)走的是四象限,合取式只是历史对照。
+  console.log(JSON.stringify({
+    rows,
+    compound: { ok: rows.length - wrong, wrong, dangerous },
+    split: { ok: rows.length - wrongNeeded, wrong: wrongNeeded, dangerous: dangerNeeded },
+    quadrant: { ok: rows.length - unsafe, unsafe, actions },
+    total: rows.length
+  }, null, 2));
 } else {
   console.log("场景 | 期望 | 判定 | p_result | margin | p_call | 延迟");
   console.log("-".repeat(80));
@@ -198,13 +211,8 @@ if (JSON_OUT) {
     console.log(id.padEnd(18) + " 正确 " + b.ok + "/" + b.total + (b.dangerous ? "  高危误删 " + b.dangerous : ""));
   }
   console.log("-".repeat(80));
-  const wrongNeeded = rows.filter((x) => !x.ok_needed).length;
-  const dangerNeeded = rows.filter((x) => !x.ok_needed && x.verdict_needed === "drop" && x.expect === "keep").length;
   console.log("合计（合取式问句）" + (rows.length - wrong) + "/" + rows.length + " 正确 · 高危误删 " + dangerous);
   console.log("合计（拆开问句）" + (rows.length - wrongNeeded) + "/" + rows.length + " 正确 · 高危误删 " + dangerNeeded);
-  const unsafe = rows.filter((x) => !x.matrixSafe).length;
-  const actions = {};
-  for (const x of rows) actions[x.matrix] = (actions[x.matrix] ?? 0) + 1;
   console.log("合计（四象限矩阵）" + (rows.length - unsafe) + "/" + rows.length + " 安全 · 误删 " + unsafe +
     " · 动作分布 " + JSON.stringify(actions));
   if (unsafe > 0) console.log("裁决（四象限矩阵）：否决——仍有内容被判可丢。");
