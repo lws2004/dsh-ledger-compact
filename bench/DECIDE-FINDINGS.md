@@ -147,6 +147,40 @@ token 匹配被证伪之后,换成**结构化**信号:后续写某个文件之�
 **结论**:判定器的 drop 判断在真实数据上**站得住**(可检测面上)。但「收益」仍未证 ——
 省下的 token 取决于 fold 端到端的 `prompt_tokens` 变化,那是另一件事。
 
+## 影子观察层:判定建议 vs 模型实际行为
+
+`bench/shadow-agreement.mjs` —— 把 `~/.decide/shadow.jsonl` 与会话存档 join 起来算一致度。
+
+**join 方式(71/71 成功,0 缺失 0 未匹配)**:shadow 每条都记了 `session` 与 `state`(该轮用户请求原文),
+所以不必重建轮次编号 —— 拿 state 去会话存档里精确匹配那条 `user/message`,匹配点之后、下一条真实
+用户消息之前,就是「模型在无判定干预下实际做的事」。影子层不改行为,这是天然的对照组。
+
+**实际行为取结构化信号**:本机 ptc 模式下所有工具都经 `run_code` 调用,故从调用参数里递归取字符串
+再匹配 `tools.X(` —— 与路径追踪同一套做法。
+
+**结果**(71 轮 / 16 个会话):
+
+| 判定 | 建议次数 | 建议且做了 | 建议没做 | 没建议却做了 |
+| --- | --- | --- | --- | --- |
+| effort = Research | 20 | **10** | 10 | **34** |
+| need_goal = CREATE_GOAL | 6 | **0** | 6 | 0 |
+| ask_now = ASK_USER | 1 | 0 | 1 | 3 |
+| delegate | 0 | 0 | 0 | 1 |
+
+**一个必须记的过程错误**:「Research」第一版只认 `web_search`/`web_fetch`,得出实际发生率 **4%**、
+一致率 **0%**。加宽到 MCP 中间层 / anysearch / `gh` / `curl` / `opencli` 之后,实际发生率 **62%**、
+命中率变成 50%。**那个 0% 是检测太窄,不是分歧。**
+
+**第二个差点报错的结论**:短续接消息(<14 字符,33/71)看起来「更容易被误判该建 goal」——
+量化后是短消息 9% vs 长消息 8%,**无差别**。样本多不等于偏差。
+
+**结论**:
+
+- `effort` 有区分度但偏保守(漏报 34 > 命中 10)。不过「漏报」的口径本身可疑:判定器问的是
+  「是否需要先收集仓库外材料才能明确该做什么」,模型顺手查个资料并不算。
+- `need_goal` 6 次建议零采纳 —— 按现在的问句,这个维度**没有转硬门控的价值**。
+- `ask_now` / `delegate` 样本不足 5 条,**无法判断**,继续攒。
+
 ## 复跑
 
 ```bash
@@ -158,4 +192,5 @@ node bench/decide-primitive-bench.mjs        # 三原语对撞
 node bench/decide-task-bench.mjs <session.jsonl.zstd>   # task 取样敏感性
 node bench/decide-gold-bench.mjs <session.jsonl.zstd>   # 用未来验证过去·token 匹配(已证伪,含随机基线)
 node bench/decide-path-trace-bench.mjs <session.jsonl.zstd>   # 用未来验证过去·路径追踪(可行版本)
+node bench/shadow-agreement.mjs            # 影子观察层:判定建议 vs 模型实际行为
 ```
