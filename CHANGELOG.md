@@ -47,6 +47,12 @@ with no user request no longer spends a verdict pass.
   it produced was an artifact. Whole-corpus rarity does separate (0.017 against 0.106), but of the
   eight surviving hits half are generic words and the rest are paths -- and "the same file was
   touched again" is the reason to drop, not evidence of a mistake. See `bench/DECIDE-FINDINGS.md`.
+- **The workable version of that idea is path tracing.** "Did the model re-read the file before
+  writing it?" is a structural fact, not a semantic guess. On four real sessions, of **42 candidates
+  judged `drop`, none erased content that was not also covered by another surviving result** -- and in
+  one session `config.js` was covered by six results while the decider dropped exactly one of them.
+  Two of the four sessions could not be checked at all (their candidates were command output with no
+  file paths), so this is a lower bound on safety, not a proof of it.
 
 ## 0.14.1
 

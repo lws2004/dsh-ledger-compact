@@ -107,6 +107,46 @@
 脚本保留在 `bench/decide-gold-bench.mjs`,头部写明结论;随机基线机制可复用。
 真实 gold 目前只能靠人工抽检,或找一个能区分「引用」与「重跑」的信号。
 
+## 「用未来验证过去」的可行版本:路径追踪
+
+token 匹配被证伪之后,换成**结构化**信号:后续写某个文件之前,有没有重新读过它。
+
+判据链(两条同时成立才算误删):
+
+1. 折页点之后 `write`/`edit` 了文件 F,而写之前**没有重新 read** F ⇒ 它用的是折页点前上下文里的内容;
+2. 且 F 在折页点前**只被那条被判 drop 的结果覆盖** ⇒ 那份内容在 fold 之后无处可寻。
+
+路径从工具调用参数里递归取字符串再抽(不能先 `JSON.stringify` 再正则 —— 引号会变成 `\"`,
+实测提取出 `.tree[] | select(.type==\\"blob` 这种残渣)。
+
+四个真实会话(每会话 12 条候选,折页点 0.6):
+
+| 会话 | 候选 | 判 drop | 能提取到文件 | 误删(内容被删光) |
+| --- | --- | --- | --- | --- |
+| eb65c218 (dsh-harness) | 12 | 12 | 11 条 | **0** |
+| 080559f2 (plugins) | 12 | 9 | 0 条 | 未检验 |
+| 35f713ba (dsh-harness) | 12 | 9 | 3 条 | **0** |
+| 540b2b69 (dsh-harness) | 12 | 12 | 6 条 | **0** |
+
+**42 条判 drop,零条造成内容彻底丢失。**
+
+两个值得记的细节:
+
+- eb65c218 里 `config.js` 在折页点前被 **6 条**结果覆盖,判定器**只 drop 了其中 1 条** ——
+  它在做差异化判断,不是一刀切。
+- 540b2b69 的 `settings.yaml` 被 2 条覆盖,drop 1 条,仍有 1 条留着。
+
+**局限(必须标注)**:
+
+- 路径提取是**下界**:code 里 `p + suffix` 这类拼接提不到;080559f2 的候选全是命令输出,
+  一条都没提到,那个会话是**未检验**,不是已验证。
+- 只覆盖「后续写文件」这一依赖面。模型在**推理或回答**里用到旧内容(不写文件)检测不到。
+- 只测了 4 个会话、每个 1 个折页点。「写前未重读」也不等于「一定用了旧内容」——
+  所以这是**误删的必要条件检验**:零命中说明没有明显误删,不等于证明零风险。
+
+**结论**:判定器的 drop 判断在真实数据上**站得住**(可检测面上)。但「收益」仍未证 ——
+省下的 token 取决于 fold 端到端的 `prompt_tokens` 变化,那是另一件事。
+
 ## 复跑
 
 ```bash
@@ -116,5 +156,6 @@ node bench/decide-wording-bench.mjs          # 措辞 vs 事实
 node bench/decide-later-bench.mjs            # 现役四句 later 措辞
 node bench/decide-primitive-bench.mjs        # 三原语对撞
 node bench/decide-task-bench.mjs <session.jsonl.zstd>   # task 取样敏感性
-node bench/decide-gold-bench.mjs <session.jsonl.zstd>   # 用未来验证过去(已证伪,含随机基线对照)
+node bench/decide-gold-bench.mjs <session.jsonl.zstd>   # 用未来验证过去·token 匹配(已证伪,含随机基线)
+node bench/decide-path-trace-bench.mjs <session.jsonl.zstd>   # 用未来验证过去·路径追踪(可行版本)
 ```
