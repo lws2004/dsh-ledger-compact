@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.14.2
+
+A skill body reaches the model whole again under ptc. Both exemptions were written for a
+deployment where the skill arrives under its own tool name; under this one it arrives inside
+a `run_code` result, so neither could fire and a SKILL.md past the threshold lost its middle
+without saying so.
+
+### Fixed
+
+- **A skill loaded through `run_code` is exempt from ingress shaping.** The tool-name guard
+  never sees it — the wrapper's name is what reaches the pass — and the content guard needs a
+  `<skill_content>` tag that only a direct skill call carries. The call itself is now the
+  locator, the same way a `snap_retrieve` redemption is exempted: matched on the program's
+  arguments, so the body survives whether the model prints it whole or a slice of it.
+
+### Changed
+
+- **`skipIngressTool` covers `open_skill` and `find_skills`.** The session catalogue points the
+  model at `open_skill` for everything it does not list, and both hand back instruction text;
+  neither was exempt even where the tool name does arrive under its own name.
+
 ## 0.14.0
 
 Where the compression actually loses information, measured without a model. The fidelity bench
