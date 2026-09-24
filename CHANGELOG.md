@@ -20,6 +20,12 @@ without saying so.
 - **`skipIngressTool` covers `open_skill` and `find_skills`.** The session catalogue points the
   model at `open_skill` for everything it does not list, and both hand back instruction text;
   neither was exempt even where the tool name does arrive under its own name.
+- **The settings surface follows DSH 0.1.7's Config-derived namespaces.** The browser half binds
+  the `configForms` service (the `settingsScope` binder is gone) and the host half exports a
+  volatile `Config` schema instead of claiming a namespace through `settings.register`; the
+  profile's own plugin configuration is the single store, every read tracks the live reference,
+  and the `/fast-compact` card reads and writes again on 0.1.7. The strict typert codecs also
+  carry the `create()` factory the 0.1.7 registry validates.
 
 ## 0.14.0
 
