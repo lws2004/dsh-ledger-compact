@@ -27,6 +27,29 @@ without saying so.
   and the `/fast-compact` card reads and writes again on 0.1.7. The strict typert codecs also
   carry the `create()` factory the 0.1.7 registry validates.
 
+## 0.14.1
+
+The ingress stops promising recoveries it cannot deliver, and says what it did instead. Under a
+ptc deployment every call arrives as `run_code`, so the readability whitelist never matched and
+an elided middle was gone for good.
+
+### Added
+
+- **`persistIngressText()`**, plus a `savedPath` branch in the elision notice: the full text of a
+  result that no `offset`/`limit` re-read can reach is written down before it is elided, and the
+  notice names the file. Off by default (`persistIngress` / `persistDir`) — it writes files, so a
+  deployment opts in rather than inheriting the behaviour.
+- **An auditable, addressable fold**: the excerpt header carries the call identity
+  (`[Snapcompact: N tokens → excerpt · run_code <description>]`), the dropped middle stays
+  retrievable by handle, and the settings layer degrades instead of taking the plugin down.
+
+### Fixed
+
+- **No promise of a re-read that command output cannot honour.** Only a file read can keep it; a
+  `bash` result now says the bytes are unreachable instead of pointing at them.
+- **The elision notice survives long lines**, and a wrapper tool is labelled by its description
+  rather than by its wrapper name alone.
+
 ## 0.14.0
 
 Where the compression actually loses information, measured without a model. The fidelity bench
