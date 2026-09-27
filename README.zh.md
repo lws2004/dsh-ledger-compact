@@ -150,13 +150,18 @@ dsh plugin --profile web add ./dsh-ledger-compact
 
 ## 折页卡
 
-纯机械，不调模型。旧折页文本不会被套娃，但也不会丢：从上一张 `[Snapcompact]` 卡里解析出的文件、意图和错误会延续到新卡（文件只占用新跨度没用完的额度）。
+纯机械，不调模型。旧折页文本不会被套娃，但也不会丢：从上一张 `[Snapcompact]` 卡里解析出的状态、文件、意图和错误会延续到新卡（文件只占用新跨度没用完的额度）。
+
+最新一次 `todo_write` 的快照作为 `STATE` 段留在卡里 —— 折页可以清掉过程，但不清掉「现在做到哪」。当前跨度里没有待办时，才回退到上一张卡继承的那份（前缀 `↩`）。
 
 ```
 [Snapcompact] Fold ~N tok. Exact file bytes are not stored — re-read with offset/limit if a detail matters.
+STATE
+- [in_progress] 正在做的事
+- [pending] 待办
 FILES
-- [edit] 路径
-- [read] 路径
+- [edit×3] 路径
+- [read] 路径 L100-149
 INTENTS
 - 最近的用户目标
 TOOLS
@@ -170,7 +175,7 @@ EXCERPT
 [tool] …
 ```
 
-文件字节不进卡。细节要对，用 `offset` / `limit` 再读一遍。
+文件字节不进卡。细节要对，用 `offset` / `limit` 再读一遍 —— 卡里的 `×N` 是编辑次数，`L100-149` 是这次读过的窗口，照它读就是同一次读。
 
 ## 和官方压缩怎么配合
 

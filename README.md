@@ -147,13 +147,18 @@ Two things below are measured, not assumed:
 
 ## Fold card
 
-Mechanical, no model. Prior fold text is never nested, but it is not lost either: files, intents and errors recovered from an earlier `[Snapcompact]` card are carried forward into the new one (files only fill capacity the new span left over).
+Mechanical, no model. Prior fold text is never nested, but it is not lost either: state, files, intents and errors recovered from an earlier `[Snapcompact]` card are carried forward into the new one (files only fill capacity the new span left over).
+
+The newest `todo_write` snapshot rides the card as `STATE`, so a fold clears the process without clearing where the work stood. A span with no todos falls back to the carried list, marked `↩`.
 
 ```
 [Snapcompact] Fold ~N tok. Exact file bytes are not stored — re-read with offset/limit if a detail matters.
+STATE
+- [in_progress] what is being worked on
+- [pending] what is queued
 FILES
-- [edit] path
-- [read] path
+- [edit×3] path
+- [read] path L100-149
 INTENTS
 - recent user goals
 TOOLS
@@ -167,7 +172,7 @@ EXCERPT
 [tool] …
 ```
 
-This is cheaper and more predictable than an LLM checkpoint. It also keeps less prose: paths, intents, tool counts, and a short excerpt — not a narrative of *why*.
+`×N` is how many edits that file took; `L100-149` is the window this read covered, the same one `offset/limit` replays. This is cheaper and more predictable than an LLM checkpoint. It also keeps less prose: paths, intents, tool counts, and a short excerpt — not a narrative of *why*.
 
 ## Working with DSH compact
 

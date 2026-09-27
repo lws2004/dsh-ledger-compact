@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.13.5
+
+The fold card was dropping the work record under session format v4, and a compact was therefore
+costing more re-work than it saved. Fixed, and the card now keeps the one piece of state that
+cannot be re-read: what the agent was in the middle of doing.
+
+### Fixed
+
+- **A v4 tool result is read again.** `toolResultOf` only knew the nested block shape; under v4 the
+  result message carries `role: "tool"` with flat content and the `toolCallId` on the message, so
+  the reader returned nothing and the card silently fell back to INTENTS + EXCERPT. Every file,
+  command, exit code and tool count was missing, with no error to notice — the card said what the
+  user asked for and never what the agent did. Same failure mode as the ingress-side v4 fix, which
+  patched `resultBlockOf` and left this reader behind.
+- **Todo whitespace collapsing used a doubled backslash**, matching a literal backslash instead of
+  collapsing whitespace.
+
+### Added
+
+- **A STATE section.** The newest `todo_write` snapshot rides the card, so a fold clears the process
+  without clearing where the work stood; a span with no todos falls back to the inherited list,
+  marked with a carried-forward arrow. `billion-context` reaches for the same idea with
+  `protectedLatestTools`. Mechanical: it carries only arguments the model already wrote, no model call.
+- **File bullets carry weight and window.** `[edit x3] path` counts edits per file, and a read that
+  named a range keeps it (`[read] path L100-149`). The card already told the model to re-read with
+  `offset`/`limit`; naming the window makes that a concrete call instead of a guess. Older cards
+  still parse.
+
+### Measured
+
+- On a real 900-message session the card goes from INTENTS + EXCERPT only to **6 state lines, 22
+  files, 15 tool counts, 26 commands and 8 errors** — 2,489 to 10,073 chars (roughly 690 to 2,800
+  tokens). Against the 179,338 tokens that fold replaced, the ratio moves from ~260:1 to ~64:1.
+  Four times the card buys back a usable work ledger; the ratio was never the point.
+
+### Known limitation
+
+- Sessions whose tool calls all arrive as `run_code` still get no FILES: that whitelist does not
+  include it, and its file operations happen inside PTC sub-calls. Reading the `code` argument or
+  subscribing to PTC dispatch events would fix it; not attempted here.
 ## 0.13.4
 
 The one competing design that runs at this plugin's layer is `billion-context`'s `absorb`: hand
