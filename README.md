@@ -55,7 +55,7 @@ The input-bar **bolt** is a context-pressure meter. By default it needs a second
 Open **Settings → 快速压缩**. Changes write through to the Host document immediately. The page is tabbed:
 
 - **入境** — the four shaping settings below.
-- **折页** — fold confirmation, replace-default, and a live preview of the fold card.
+- **折页** — fold confirmation, replace-default, the verdict fold, and a live preview of the fold card.
 - **诊断** — plugin version, the session-event accessor this DSH exposes, ingress counters and the last failure, and how many compaction engines are hooked (plus any engine that would silently fall back to a model call).
 
 | Setting | Default | Meaning |
@@ -64,6 +64,7 @@ Open **Settings → 快速压缩**. Changes write through to the Host document i
 | Allow dense PNG (`snapImages`) | off | Attach a bitmap only when the main model lists `image` in `inputModalities` **and** the image is cheaper than the original |
 | Confirm before fold (`confirmFold`) | on | Bolt requires a second click |
 | Replace default compact (`replaceDefault`) | **off** | `/compact`, automatic pressure compaction, and overflow recovery use the mechanical summarizer |
+| Verdict fold (`decideFold`) | **off** | Ask typed-decide which results the card must carry verbatim. Unreachable, slow, or low-margin answers all fall back to the mechanical card |
 | Ingress threshold (`minSnapTokens`) | `3000` | Approximate tokens before an excerpt (or PNG) is considered. Range 200–200000 |
 | PNG savings (`savingsRatio`) | `0.85` | Excerpt + estimated image tokens must be ≤ this fraction of the original |
 
@@ -230,3 +231,23 @@ DSH_SCHEMASTER_MODULE="$DSH/node_modules/@deepseek-ai/schemastery/lib/index.mjs"
 ## License
 
 MIT. Bitmap fonts under `lib/fonts/` are documented in [`lib/fonts/README.md`](lib/fonts/README.md).
+
+## Model Experience
+
+### Tool-result shaping before the model sees it
+
+#### What the model sees
+
+到达模型前已被整形/剪枝的大工具结果，以及被剪内容的回读地址（ledger）。
+
+#### Token effect
+
+Replaced — 用摘要替换原始长结果，总量随被剪内容规模变化（省幅见本包基准）。
+
+#### KV Cache effect
+
+Replacing — 剪枝改变历史消息内容，会使此前可复用的前缀失效。
+
+## Known Limitations and Deferred Work
+
+- **压缩有损** — 摘要可能丢掉后续轮次真正需要的细节，需依赖回读路径取回；回读不可用时信息不可恢复。
