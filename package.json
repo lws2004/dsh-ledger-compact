@@ -10,7 +10,8 @@
     ".": "./lib/index.js",
     "./client": "./lib/client.js",
     "./ledger": "./lib/ledger.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
   },
   "keywords": [
     "dsh",
@@ -52,7 +53,9 @@
     "cordis.patch.yml",
     "LICENSE",
     "README.md",
-    "README.zh.md"
+    "README.zh.md",
+    "locale",
+    "icon.svg"
   ],
   "scripts": {
     "test": "node --test lib/ledger.test.js",
@@ -68,5 +71,10 @@
     "@deepseek-ai/dsh-token-meter": "^0.1.7-rc.1 || ^0.2.0-rc.1",
     "@deepseek-ai/dsh-tools": "^0.1.7-rc.1 || ^0.2.0-rc.1",
     "@deepseek-ai/schemastery": "^3.18.4"
+  },
+  "icon": "./icon.svg",
+  "meta": {
+    "title": "Ledger Compact",
+    "description": "Ingress shaping plus optional local fast-compact; can replace the built-in /compact and automatic compaction."
   }
 }
