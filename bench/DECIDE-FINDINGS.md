@@ -193,4 +193,71 @@ node bench/decide-task-bench.mjs <session.jsonl.zstd>   # task 取样敏感性
 node bench/decide-gold-bench.mjs <session.jsonl.zstd>   # 用未来验证过去·token 匹配(已证伪,含随机基线)
 node bench/decide-path-trace-bench.mjs <session.jsonl.zstd>   # 用未来验证过去·路径追踪(可行版本)
 node bench/shadow-agreement.mjs            # 影子观察层:判定建议 vs 模型实际行为
+node bench/decide-shape-bench.mjs <session.jsonl.zstd>   # 问句形状对照(needed 维度)
+node bench/decide-rerun-bench.mjs <session.jsonl.zstd>    # rerun 问句对照 + 重取 gold
+node bench/decide-rerun-verify.mjs <session.jsonl.zstd>  # 落地前验证(criteria 方向自洽)
+node bench/candidate-pool-audit.mjs <session.jsonl.zstd> # 候选池构成审计
+node bench/decide-oneoff-probe.mjs <session.jsonl.zstd>  # 一次性条目候选池可行性探针
 ```
+
+## 2026-10-04:keep 在真实会话上不可达,判定式折页零内容收益
+
+接线后首次在真实会话上跑判定。四会话 48 条候选,三次实验(共 11 个问句变体)结论一致。
+
+### 先修一个读代码才会发现的前提
+
+`fold.js` 只对 `action === "keep"` 恢复内容(`verdictBodyLines`,14 行)。
+`truncate` 与 `drop` 的卡片内容**与机械折页逐字相同**,只有一段 verdictFold 统计文字。
+所以判定器唯一的作用是「决定哪些条目被捞回」,四象限里能做这件事的只有 keep 格。
+
+### 真实基线
+
+四个会话(352/295/485/133 条工具结果):needed 概率 0.34–0.75、margin 中位约 0.10,
+全部低于 `minMargin=0.15` → **75% 退回 mechanical**。但 margin 不是关键:
+即便 margin 全部达标,落点也是 `truncate` 而非 `keep`。
+
+### keep 不可达的三重证据
+
+| 尝试 | 臂数 | keep | 结论 |
+| --- | --- | --- | --- |
+| needed 问句对照 | 4 | 0 | 换 needed 措辞不改变可达性 |
+| rerun 问句对照 | 5 + 3 | 0 | 方向自洽的臂全为 0 |
+| 强制一次性条目候选池 | 1 | 0 / 72 | 连候选池换掉也救不回来 |
+
+### 两次非零的 keep 都是方向错位的假象
+
+`decide-rerun-bench` 报 `R2` keep 6(精确率 73%)、`decide-rerun-verify` 报 `P3` keep 14(精确率 71%)。
+复核 criteria 后两条都作废:
+
+- `R2` 问句问 one-off,`criteria.true` 却写 "cheap to obtain again";
+- `P3` 的 `criteria` 是 `{true:"one-off", false:"reproducible"}`,与 `verdictAction` 约定
+  (`probability>=0.5` 表示可重跑)**方向相反**,把判定器说的「可复现」当成了「不可重跑」。
+
+改用方向自洽的 criteria(`{true:"cheap to obtain again", false:"one-off"}`)后 keep 归零。
+**P3 那 71% 精确率是 gold 局限造成的假象**:gold 判「不可寻」的标准是「事后没重取也没改写」,
+而「可重跑但事后没需要重取」同样满足该标准。事后没重取 ≠ 不可重跑。
+
+### 根因:判定器是对的
+
+探针明细里 `Run cua unit tests after the fixes` 判 `r=0.70`、`Fetch official jev-use integration docs`
+判 `r=0.87`——agent 场景下跑一次测试、取一次文档,重跑同一条工具调用确实能复现。
+**keep=0 是判定器正确工作的结果,不是缺陷。** 真正一次性的内容(打印一次的 id、已变更的值、
+瞬时观测)既罕见又 token 小,进不了按 token 降序的前 12。
+
+### 顺带查出的候选池漏采
+
+`candidate-pool-audit.mjs`:一次性条目(首词属 run/check/verify/fetch 类)占全部 token 10.5%,
+却只拿到候选池 5.4%,6 个会话里 3 个一条都没进——`pickCandidates` 按 token 降序,
+候选池一半以上被 `read` 类(171k tok)占走。
+
+### 成本
+
+台账 `~/.decide/ledger.jsonl` 共 11048 条判定,其中 **26854 次命中走 OpenRouter
+`typesafe/jev-1.13`(云端,累计 $1.71)**,本机 `StartLux-Decision-4B` 只有 236 次。
+每次折页 12 条候选 ≈ 24 次云端调用。零内容收益 + 真实计费 + 1.6–4s 预算。
+
+### 裁决
+
+判定式折页当前**零收益**,`decideFold` 应保持关闭。恢复它需要一个新前提:先证明真实会话里
+存在足量「重跑拿不回」的内容,再谈四象限。本条是「**这一层现在值不值得开**」的判据,
+与 `compression_coverage_ceiling.md`(覆盖率天花板)是两个独立的否决理由。
